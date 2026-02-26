@@ -66,6 +66,10 @@ export default function StoriesList() {
 
       for (const storyDoc of querySnapshot.docs) {
         const storyData = storyDoc.data();
+        
+        // Skip stories pending moderation
+        if (storyData.status === 'pending_moderation') continue;
+
         let profileData = { username: 'Unknown', avatar_url: null };
 
         if (storyData.user_id) {
@@ -77,8 +81,10 @@ export default function StoriesList() {
                 avatar_url: profileDoc.data().avatar_url || null
               };
             }
-          } catch (e) {
-            console.error('Error fetching profile for story:', e);
+          } catch (e: any) {
+            if (e.code !== 'unavailable') {
+              console.error('Error fetching profile for story:', e);
+            }
           }
         }
 

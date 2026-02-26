@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { User, onAuthStateChanged, signOut as firebaseSignOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, updateDoc } from 'firebase/firestore';
 import { auth, db } from '@/src/lib/firebase';
 
 interface AuthState {
@@ -13,13 +13,24 @@ interface AuthState {
   checkSession: () => Promise<void>;
 }
 
-export const useAuthStore = create<AuthState>((set) => ({
+export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   profile: null,
   isLoading: true,
   setUser: (user) => set({ user }),
   setProfile: (profile) => set({ profile }),
   signOut: async () => {
+    const { user } = get();
+    if (user) {
+      try {
+        await updateDoc(doc(db, 'profiles', user.uid), {
+          is_online: false,
+          last_seen: new Date().toISOString()
+        });
+      } catch (e) {
+        console.error('Error updating presence on signout:', e);
+      }
+    }
     await firebaseSignOut(auth);
     set({ user: null, profile: null });
   },
@@ -32,11 +43,19 @@ export const useAuthStore = create<AuthState>((set) => ({
             const profileDoc = await getDoc(doc(db, 'profiles', user.uid));
             if (profileDoc.exists()) {
               set({ profile: { id: profileDoc.id, ...profileDoc.data() } });
+              
+              // Update presence
+              await updateDoc(doc(db, 'profiles', user.uid), {
+                is_online: true,
+                last_seen: new Date().toISOString()
+              });
             } else {
               set({ profile: null });
             }
-          } catch (error) {
-            console.error('Error fetching profile:', error);
+          } catch (error: any) {
+            if (error.code !== 'unavailable') {
+              console.error('Error fetching profile:', error);
+            }
           }
         } else {
           set({ user: null, profile: null });

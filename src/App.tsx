@@ -16,6 +16,7 @@ import ActivityScreen from './features/activity/ActivityScreen';
 import ProfileScreen from './features/profile/ProfileScreen';
 import ChatListScreen from './features/chat/ChatListScreen';
 import ChatScreen from './features/chat/ChatScreen';
+import ChatroomScreen from './features/chat/ChatroomScreen';
 import AdminReportsScreen from './features/admin/AdminReportsScreen';
 import { AlertTriangle } from 'lucide-react';
 
@@ -59,6 +60,7 @@ export default function App() {
             <Route path="/activity" element={<ActivityScreen />} />
             <Route path="/chats" element={<ChatListScreen />} />
             <Route path="/chats/:id" element={<ChatScreen />} />
+            <Route path="/rooms/:id" element={<ChatroomScreen />} />
             <Route path="/admin/reports" element={<AdminReportsScreen />} />
             <Route path="/profile" element={<ProfileScreen />} />
             <Route path="/profile/:id" element={<ProfileScreen />} />

@@ -3,12 +3,13 @@ import { db } from '@/src/lib/firebase';
 import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, deleteDoc, where, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, Share2, MoreHorizontal, ShieldAlert, Flag } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, ShieldAlert, Flag, Loader2 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import CommentsModal from './CommentsModal';
 import StoriesList from '../stories/StoriesList';
 import { ModerationService } from '@/src/services/moderationService';
 import { NotificationService } from '@/src/services/notificationService';
+import { cacheService } from '@/src/services/cacheService';
 
 interface Post {
   id: string;
@@ -33,7 +34,13 @@ export default function FeedScreen() {
   const [hasMore, setHasMore] = useState(true);
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
+  const [activeTab, setActiveTab] = useState<'latest' | 'trending'>('latest');
   const { user } = useAuthStore();
+
+  // Pull to refresh state
+  const [refreshing, setRefreshing] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [startY, setStartY] = useState(0);
 
   useEffect(() => {
     const init = async () => {
@@ -44,27 +51,54 @@ export default function FeedScreen() {
       fetchPosts();
     };
     init();
-  }, [user]);
+  }, [user, activeTab]);
 
   const fetchPosts = async (isLoadMore = false) => {
     if (isLoadMore && !hasMore) return;
     
     try {
       if (isLoadMore) setLoadingMore(true);
-      else setLoading(true);
+      else if (!refreshing) setLoading(true);
 
-      let postsQuery = query(
-        collection(db, 'posts'), 
-        orderBy('created_at', 'desc'), 
-        limit(10)
-      );
+      // Try to load from cache first if not loading more
+      if (!isLoadMore && !refreshing) {
+        const cachedPosts = await cacheService.getPosts();
+        if (cachedPosts.length > 0) {
+          // Sort cached posts by date
+          cachedPosts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+          setPosts(cachedPosts);
+          setLoading(false); // Show cached content immediately
+        }
+      }
 
-      if (isLoadMore && lastVisible) {
+      let postsQuery;
+
+      if (activeTab === 'latest') {
+        // ... existing query logic ...
+        postsQuery = query(
+          collection(db, 'posts'), 
+          orderBy('created_at', 'desc'), 
+          limit(10)
+        );
+
+        if (isLoadMore && lastVisible) {
+          postsQuery = query(
+            collection(db, 'posts'),
+            orderBy('created_at', 'desc'),
+            startAfter(lastVisible),
+            limit(10)
+          );
+        }
+      } else {
+        // ... existing trending query logic ...
+        const yesterday = new Date();
+        yesterday.setDate(yesterday.getDate() - 1);
+        
         postsQuery = query(
           collection(db, 'posts'),
+          where('created_at', '>=', yesterday.toISOString()),
           orderBy('created_at', 'desc'),
-          startAfter(lastVisible),
-          limit(10)
+          limit(50)
         );
       }
 
@@ -72,38 +106,56 @@ export default function FeedScreen() {
       
       if (querySnapshot.empty) {
         setHasMore(false);
-        if (!isLoadMore) setPosts([]);
+        if (!isLoadMore && posts.length === 0) setPosts([]); // Only clear if no cached posts either
         return;
       }
 
-      setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
-      if (querySnapshot.size < 10) setHasMore(false);
+      if (activeTab === 'latest') {
+        setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+        if (querySnapshot.size < 10) setHasMore(false);
+      } else {
+        setHasMore(false);
+      }
 
-      const fetchedPosts: Post[] = [];
+      let fetchedPosts: Post[] = [];
       
       for (const postDoc of querySnapshot.docs) {
-        const postData = postDoc.data();
+        // ... existing post processing logic ...
+        const postData = postDoc.data() as any;
         
         // Skip if user is blocked
         if (blockedUserIds.includes(postData.user_id)) continue;
 
-        // Fetch profile (Optimized: we could denormalize this into the post doc for ultra-fast response)
+        // Fetch profile
         let profileData = { username: 'Unknown', avatar_url: '' };
         if (postData.user_id) {
           try {
+            // Try cache first for profile
+            const cachedProfile = await cacheService.getProfile(postData.user_id);
+            if (cachedProfile) {
+              profileData = cachedProfile;
+            }
+            
+            // Then fetch fresh
             const profileDoc = await getDoc(doc(db, 'profiles', postData.user_id));
             if (profileDoc.exists()) {
               profileData = {
                 username: profileDoc.data().username,
                 avatar_url: profileDoc.data().avatar_url || ''
               };
+              // Update cache
+              await cacheService.saveProfile({ id: postData.user_id, ...profileData });
             }
-          } catch (e) {
-            console.error('Error fetching profile for post:', e);
+          } catch (e: any) {
+             // ... error handling ...
+             if (e.code !== 'unavailable') {
+              console.error('Error fetching profile for post:', e);
+            }
           }
         }
 
-        // Fetch likes count (Optimized: should be a field in the post doc)
+        // ... existing likes/comments fetching ...
+        // Fetch likes count
         let likesCount = 0;
         try {
           const likesQuery = query(collection(db, 'likes'), where('post_id', '==', postDoc.id));
@@ -113,7 +165,7 @@ export default function FeedScreen() {
           console.error('Error fetching likes:', e);
         }
 
-        // Fetch comments count (Optimized: should be a field in the post doc)
+        // Fetch comments count
         let commentsCount = 0;
         try {
           const commentsQuery = query(collection(db, 'comments'), where('post_id', '==', postDoc.id));
@@ -135,6 +187,7 @@ export default function FeedScreen() {
         });
       }
 
+      // ... existing user likes check ...
       if (user && fetchedPosts.length > 0) {
         try {
           const userLikesQuery = query(collection(db, 'likes'), where('user_id', '==', user.uid));
@@ -149,13 +202,33 @@ export default function FeedScreen() {
         }
       }
 
-      if (isLoadMore) {
-        setPosts(prev => [...prev, ...fetchedPosts]);
+      if (activeTab === 'trending') {
+        fetchedPosts.sort((a, b) => {
+          const scoreA = (a.likes[0]?.count || 0) + (a.comments[0]?.count || 0);
+          const scoreB = (b.likes[0]?.count || 0) + (b.comments[0]?.count || 0);
+          return scoreB - scoreA;
+        });
+      }
+
+      if (isLoadMore && activeTab === 'latest') {
+        setPosts(prev => {
+           const newPosts = [...prev, ...fetchedPosts];
+           // Save to cache (only latest 50 to avoid bloat)
+           if (activeTab === 'latest') {
+             cacheService.savePosts(newPosts.slice(0, 50));
+           }
+           return newPosts;
+        });
       } else {
         setPosts(fetchedPosts);
+        // Save to cache
+        if (activeTab === 'latest') {
+          cacheService.savePosts(fetchedPosts);
+        }
       }
     } catch (error) {
       console.error('Error fetching posts:', error);
+      // If error (e.g. offline), we already showed cached posts if available
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -220,7 +293,33 @@ export default function FeedScreen() {
     }
   };
 
-  if (loading) {
+  const handleTouchStart = (e: React.TouchEvent) => {
+    if (window.scrollY === 0) {
+      setStartY(e.touches[0].clientY);
+    }
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    if (startY > 0) {
+      const currentY = e.touches[0].clientY;
+      const distance = currentY - startY;
+      if (distance > 0 && window.scrollY === 0) {
+        setPullDistance(Math.min(distance * 0.5, 100)); // Max pull distance
+      }
+    }
+  };
+
+  const handleTouchEnd = async () => {
+    if (pullDistance > 60) {
+      setRefreshing(true);
+      await fetchPosts();
+      setRefreshing(false);
+    }
+    setStartY(0);
+    setPullDistance(0);
+  };
+
+  if (loading && !refreshing) {
     return (
       <div className="flex flex-col space-y-8 p-4">
         {[1, 2, 3].map((i) => (
@@ -238,11 +337,73 @@ export default function FeedScreen() {
   }
 
   return (
-    <div className="flex flex-col pb-20 sm:pb-0">
+    <div 
+      className="flex flex-col pb-20 sm:pb-0 relative"
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      {/* Pull to refresh indicator */}
+      <div 
+        className="absolute top-0 left-0 right-0 flex justify-center items-center overflow-hidden transition-all duration-200 ease-out z-50 pointer-events-none"
+        style={{ height: `${pullDistance}px`, opacity: pullDistance / 100 }}
+      >
+        <div className={cn(
+          "w-8 h-8 rounded-full bg-[#1a1a1a] border border-white/10 flex items-center justify-center shadow-lg",
+          refreshing && "animate-spin"
+        )}>
+          <Loader2 className="w-4 h-4 text-[#C6A75E]" />
+        </div>
+      </div>
+
       {/* Header */}
-      <header className="sticky top-0 z-40 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-white/5 px-4 py-3 flex items-center justify-between sm:hidden">
+      <header className="sticky top-0 z-40 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-white/5 px-4 py-3 flex flex-col space-y-3 sm:hidden">
         <h1 className="text-xl font-bold tracking-tight text-[#C6A75E]">old Gold</h1>
+        
+        {/* Mobile Tabs */}
+        <div className="flex space-x-4">
+          <button
+            onClick={() => setActiveTab('latest')}
+            className={cn(
+              "text-sm font-medium transition-colors pb-1 border-b-2",
+              activeTab === 'latest' ? "text-white border-[#C6A75E]" : "text-gray-500 border-transparent hover:text-gray-300"
+            )}
+          >
+            Latest
+          </button>
+          <button
+            onClick={() => setActiveTab('trending')}
+            className={cn(
+              "text-sm font-medium transition-colors pb-1 border-b-2",
+              activeTab === 'trending' ? "text-white border-[#C6A75E]" : "text-gray-500 border-transparent hover:text-gray-300"
+            )}
+          >
+            Trending
+          </button>
+        </div>
       </header>
+
+      {/* Desktop Tabs */}
+      <div className="hidden sm:flex items-center space-x-6 px-6 py-4 border-b border-white/5">
+        <button
+          onClick={() => setActiveTab('latest')}
+          className={cn(
+            "text-sm font-medium transition-colors pb-1 border-b-2",
+            activeTab === 'latest' ? "text-white border-[#C6A75E]" : "text-gray-500 border-transparent hover:text-gray-300"
+          )}
+        >
+          Latest
+        </button>
+        <button
+          onClick={() => setActiveTab('trending')}
+          className={cn(
+            "text-sm font-medium transition-colors pb-1 border-b-2",
+            activeTab === 'trending' ? "text-white border-[#C6A75E]" : "text-gray-500 border-transparent hover:text-gray-300"
+          )}
+        >
+          Trending
+        </button>
+      </div>
 
       {/* Stories */}
       <StoriesList />

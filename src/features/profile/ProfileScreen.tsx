@@ -7,6 +7,8 @@ import EditProfileModal from './EditProfileModal';
 import { useParams } from 'react-router-dom';
 import { ModerationService } from '@/src/services/moderationService';
 import { NotificationService } from '@/src/services/notificationService';
+import { motion, useScroll, useTransform } from 'motion/react';
+import UserListModal from './UserListModal';
 
 interface Profile {
   id: string;
@@ -32,6 +34,16 @@ export default function ProfileScreen() {
   const [isFollowing, setIsFollowing] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false);
   const [isBlockingMe, setIsBlockingMe] = useState(false);
+  const [userListModal, setUserListModal] = useState<{ isOpen: boolean; type: 'followers' | 'following'; title: string }>({
+    isOpen: false,
+    type: 'followers',
+    title: ''
+  });
+  const { scrollY } = useScroll();
+
+  // Transform scale based on scroll position (0 to 100px)
+  const avatarScale = useTransform(scrollY, [0, 100], [1, 0.8]);
+  const avatarOpacity = useTransform(scrollY, [0, 100], [1, 0.5]);
 
   const profileId = id || user?.uid;
   const isOwnProfile = user?.uid === profileId;
@@ -136,8 +148,10 @@ export default function ProfileScreen() {
           following: [{ count: followingSnapshot.size }]
         });
       }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
+    } catch (error: any) {
+      if (error.code !== 'unavailable') {
+        console.error('Error fetching profile:', error);
+      }
     }
   };
 
@@ -180,7 +194,7 @@ export default function ProfileScreen() {
   }
 
   return (
-    <div className="flex flex-col pb-20 sm:pb-0">
+    <div className="flex flex-col pb-20 sm:pb-0 h-full overflow-y-auto">
       <header className="sticky top-0 z-40 bg-[#0a0a0a]/80 backdrop-blur-xl border-b border-white/5 px-4 py-3 flex items-center justify-between">
         <h1 className="text-lg font-semibold tracking-tight text-white">{profile?.username}</h1>
         <div className="flex items-center space-x-4">
@@ -195,7 +209,10 @@ export default function ProfileScreen() {
 
       <div className="p-4 sm:p-6 space-y-6">
         <div className="flex items-center justify-between">
-          <div className="w-20 h-20 rounded-full bg-white/10 overflow-hidden border border-white/5">
+          <motion.div 
+            style={{ scale: avatarScale, opacity: avatarOpacity }}
+            className="w-20 h-20 rounded-full bg-white/10 overflow-hidden border border-white/5 origin-left"
+          >
             {profile?.avatar_url ? (
               <img src={profile.avatar_url} alt="" className="w-full h-full object-cover" />
             ) : (
@@ -203,20 +220,26 @@ export default function ProfileScreen() {
                 {profile?.username?.[0]?.toUpperCase()}
               </div>
             )}
-          </div>
+          </motion.div>
           <div className="flex space-x-6 text-center">
             <div>
               <p className="text-xl font-bold text-white">{posts.length}</p>
               <p className="text-xs text-gray-500 font-medium tracking-wide">POSTS</p>
             </div>
-            <div>
+            <button 
+              onClick={() => setUserListModal({ isOpen: true, type: 'followers', title: 'Followers' })}
+              className="hover:opacity-80 transition-opacity"
+            >
               <p className="text-xl font-bold text-white">{profile?.followers?.[0]?.count || 0}</p>
               <p className="text-xs text-gray-500 font-medium tracking-wide">FOLLOWERS</p>
-            </div>
-            <div>
+            </button>
+            <button 
+              onClick={() => setUserListModal({ isOpen: true, type: 'following', title: 'Following' })}
+              className="hover:opacity-80 transition-opacity"
+            >
               <p className="text-xl font-bold text-white">{profile?.following?.[0]?.count || 0}</p>
               <p className="text-xs text-gray-500 font-medium tracking-wide">FOLLOWING</p>
-            </div>
+            </button>
           </div>
         </div>
 
@@ -323,15 +346,13 @@ export default function ProfileScreen() {
         )}
       </div>
 
-      {isEditModalOpen && (
-        <EditProfileModal
-          isOpen={isEditModalOpen}
-          onClose={() => setIsEditModalOpen(false)}
-          currentBio={profile?.bio || null}
-          currentAvatarUrl={profile?.avatar_url || null}
-          onProfileUpdated={fetchProfile}
-        />
-      )}
+      <EditProfileModal
+        isOpen={isEditModalOpen}
+        onClose={() => setIsEditModalOpen(false)}
+        currentBio={profile?.bio || null}
+        currentAvatarUrl={profile?.avatar_url || null}
+        onProfileUpdated={fetchProfile}
+      />
     </div>
   );
 }

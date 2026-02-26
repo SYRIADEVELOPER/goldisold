@@ -1,18 +1,37 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
 import { Home, Search, PlusSquare, Activity, User, MessageCircle, Shield } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useAuthStore } from '@/src/features/auth/store';
+import { db } from '@/src/lib/firebase';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 
 export default function MainLayout() {
   const { user } = useAuthStore();
   const isAdmin = user?.email === 'kiatrbe3a@gmail.com';
+  const [unreadCount, setUnreadCount] = useState(0);
+
+  useEffect(() => {
+    if (!user) return;
+
+    const q = query(
+      collection(db, 'notifications'),
+      where('user_id', '==', user.uid),
+      where('is_read', '==', false)
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      setUnreadCount(snapshot.size);
+    });
+
+    return () => unsubscribe();
+  }, [user]);
 
   const navItems = [
     { icon: Home, label: 'Home', path: '/' },
     { icon: Search, label: 'Search', path: '/search' },
     { icon: PlusSquare, label: 'Create', path: '/create' },
-    { icon: Activity, label: 'Activity', path: '/activity' },
+    { icon: Activity, label: 'Activity', path: '/activity', badge: unreadCount },
     { icon: MessageCircle, label: 'Messages', path: '/chats' },
     { icon: User, label: 'Profile', path: '/profile' },
   ];
@@ -38,12 +57,20 @@ export default function MainLayout() {
             to={item.path}
             className={({ isActive }) =>
               cn(
-                "flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors",
+                "flex flex-col items-center justify-center w-full h-full space-y-1 transition-colors relative",
                 isActive ? "text-[#C6A75E]" : "text-gray-500 hover:text-gray-300"
               )
             }
           >
-            <item.icon className="w-6 h-6" />
+            <div className="relative">
+              <item.icon className="w-6 h-6" />
+              {item.badge && item.badge > 0 ? (
+                <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                </span>
+              ) : null}
+            </div>
             <span className="text-[10px] font-medium">{item.label}</span>
           </NavLink>
         ))}
@@ -61,14 +88,22 @@ export default function MainLayout() {
               to={item.path}
               className={({ isActive }) =>
                 cn(
-                  "flex items-center space-x-4 px-4 py-3 rounded-xl transition-all",
+                  "flex items-center space-x-4 px-4 py-3 rounded-xl transition-all relative",
                   isActive 
                     ? "bg-white/5 text-[#C6A75E] font-semibold" 
                     : "text-gray-400 hover:bg-white/5 hover:text-gray-200"
                 )
               }
             >
-              <item.icon className="w-6 h-6" />
+              <div className="relative">
+                <item.icon className="w-6 h-6" />
+                {item.badge && item.badge > 0 ? (
+                  <span className="absolute -top-1 -right-1 flex h-3 w-3">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-red-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-3 w-3 bg-red-500"></span>
+                  </span>
+                ) : null}
+              </div>
               <span className="text-lg">{item.label}</span>
             </NavLink>
           ))}

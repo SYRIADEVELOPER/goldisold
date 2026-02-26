@@ -1,11 +1,10 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { db, storage } from '@/src/lib/firebase';
-import { collection, addDoc } from 'firebase/firestore';
+import { collection, addDoc, doc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuthStore } from '../auth/store';
-import { X, Loader2, Image as ImageIcon } from 'lucide-react';
+import { X, Loader2, Image as ImageIcon, Type } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-// import imageCompression from 'browser-image-compression';
 
 interface CreateStoryModalProps {
   isOpen: boolean;
@@ -18,6 +17,7 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
   const [preview, setPreview] = useState<string | null>(null);
   const [textOverlay, setTextOverlay] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isTextOnly, setIsTextOnly] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuthStore();
 
@@ -35,6 +35,7 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
         return;
       }
       setImage(file);
+      setIsTextOnly(false);
       const reader = new FileReader();
       reader.onloadend = () => {
         setPreview(reader.result as string);
@@ -44,42 +45,56 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
   };
 
   const handlePost = async () => {
-    if (!image || !user) return;
+    if (!user) return;
+    if (!image && !isTextOnly) return;
+    if (isTextOnly && !textOverlay.trim()) {
+      alert('Please enter some text for your story');
+      return;
+    }
 
     setLoading(true);
     try {
-      /*
-      const options = {
-        maxSizeMB: 1,
-        maxWidthOrHeight: 1920,
-        useWebWorker: true,
-      };
-      const compressedFile = await imageCompression(image, options);
-      */
-      const compressedFile = image; // Temporary bypass
+      let imageUrl = null;
 
-      const fileExt = image.name.split('.').pop() || 'jpg';
-      const fileName = `${Math.random()}.${fileExt}`;
-      const filePath = `stories/${user.uid}/${fileName}`;
+      if (image) {
+        const fileExt = image.name.split('.').pop() || 'jpg';
+        const fileName = `${Math.random()}.${fileExt}`;
+        const filePath = `stories/${user.uid}/${fileName}`;
 
-      const storageRef = ref(storage, filePath);
-      await uploadBytes(storageRef, compressedFile);
-      const imageUrl = await getDownloadURL(storageRef);
+        const storageRef = ref(storage, filePath);
+        await uploadBytes(storageRef, image);
+        imageUrl = await getDownloadURL(storageRef);
+      }
 
       const expiresAt = new Date();
       expiresAt.setHours(expiresAt.getHours() + 24);
+
+      // Check if photo moderation is mandatory
+      let status = 'published';
+      const configDoc = await getDoc(doc(db, 'system_config', 'moderation'));
+      const mandatoryPhotoModeration = configDoc.exists() ? configDoc.data().mandatory_photo_moderation : false;
+
+      if (imageUrl && mandatoryPhotoModeration) {
+        status = 'pending_moderation';
+      }
 
       await addDoc(collection(db, 'stories'), {
         user_id: user.uid,
         image_url: imageUrl,
         text_overlay: textOverlay.trim() || null,
         created_at: new Date().toISOString(),
-        expires_at: expiresAt.toISOString()
+        expires_at: expiresAt.toISOString(),
+        status: status
       });
+
+      if (status === 'pending_moderation') {
+        alert('Your story has been submitted for moderation and will be published once approved.');
+      }
 
       setImage(null);
       setPreview(null);
       setTextOverlay('');
+      setIsTextOnly(false);
       onStoryAdded();
       onClose();
     } catch (error: any) {
@@ -101,26 +116,44 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {!preview ? (
-            <div 
-              onClick={() => fileInputRef.current?.click()}
-              className="w-full aspect-[9/16] border-2 border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#C6A75E] hover:bg-white/5 transition-all"
-            >
-              <ImageIcon className="w-12 h-12 text-gray-500 mb-4" />
-              <p className="text-sm font-medium text-gray-400">Tap to select a photo</p>
+          {!preview && !isTextOnly ? (
+            <div className="flex flex-col space-y-4">
+              <div 
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full aspect-[9/16] border-2 border-dashed border-white/20 rounded-xl flex flex-col items-center justify-center cursor-pointer hover:border-[#C6A75E] hover:bg-white/5 transition-all"
+              >
+                <ImageIcon className="w-12 h-12 text-gray-500 mb-4" />
+                <p className="text-sm font-medium text-gray-400">Tap to select a photo</p>
+              </div>
+              <div className="flex items-center justify-center">
+                <span className="text-gray-500 text-sm">OR</span>
+              </div>
+              <button
+                onClick={() => setIsTextOnly(true)}
+                className="w-full py-4 border-2 border-white/10 rounded-xl flex flex-col items-center justify-center hover:border-[#C6A75E] hover:bg-white/5 transition-all text-gray-400 hover:text-white"
+              >
+                <Type className="w-8 h-8 mb-2" />
+                <span className="text-sm font-medium">Create Text Story</span>
+              </button>
             </div>
           ) : (
-            <div className="relative w-full aspect-[9/16] rounded-xl overflow-hidden bg-black">
-              <img src={preview} alt="Preview" className="w-full h-full object-cover" />
+            <div className={cn(
+              "relative w-full aspect-[9/16] rounded-xl overflow-hidden",
+              isTextOnly ? "bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500" : "bg-black"
+            )}>
+              {preview && (
+                <img src={preview} alt="Preview" className="w-full h-full object-cover" />
+              )}
               
               <div className="absolute inset-0 flex items-center justify-center p-8">
                 <textarea
                   value={textOverlay}
                   onChange={(e) => setTextOverlay(e.target.value)}
-                  placeholder="WHAT'S ON YOUR MIND?"
-                  className="w-full bg-transparent text-white text-center text-4xl font-black uppercase tracking-tighter placeholder-white/20 focus:outline-none resize-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none"
+                  placeholder={isTextOnly ? "TYPE YOUR STORY..." : "WHAT'S ON YOUR MIND?"}
+                  className="w-full bg-transparent text-white text-center text-4xl font-black uppercase tracking-tighter placeholder-white/50 focus:outline-none resize-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none"
                   rows={4}
                   maxLength={100}
+                  autoFocus={isTextOnly}
                 />
               </div>
 
@@ -129,6 +162,7 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
                   setImage(null);
                   setPreview(null);
                   setTextOverlay('');
+                  setIsTextOnly(false);
                 }}
                 className="absolute top-4 right-4 p-2 bg-black/50 backdrop-blur-md rounded-full text-white hover:bg-black/70 transition-colors"
               >
@@ -149,10 +183,10 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
         <div className="p-4 border-t border-white/5">
           <button
             onClick={handlePost}
-            disabled={loading || !image}
+            disabled={loading || (!image && !isTextOnly) || (isTextOnly && !textOverlay.trim())}
             className={cn(
               "w-full py-3 rounded-xl font-medium transition-colors flex items-center justify-center space-x-2",
-              loading || !image
+              loading || (!image && !isTextOnly) || (isTextOnly && !textOverlay.trim())
                 ? "bg-white/10 text-gray-500 cursor-not-allowed"
                 : "bg-[#C6A75E] text-[#0a0a0a] hover:bg-[#b59855]"
             )}

@@ -4,10 +4,11 @@ import { formatDistanceToNow } from 'date-fns';
 import { db } from '@/src/lib/firebase';
 import { doc, setDoc } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
+import { cn } from '@/src/lib/utils';
 
 interface Story {
   id: string;
-  image_url: string;
+  image_url: string | null;
   text_overlay: string | null;
   created_at: string;
   profiles: {
@@ -129,26 +130,33 @@ export default function ViewStoryModal({ stories, initialIndex, isOpen, onClose 
               </span>
             </div>
           </div>
-          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors">
+          <button onClick={onClose} className="p-2 hover:bg-white/10 rounded-full transition-colors z-30 relative">
             <X className="w-6 h-6 text-white" />
           </button>
         </div>
 
-        {/* Image */}
-        <img 
-          src={currentStory.image_url} 
-          alt="Story" 
-          className="w-full h-full object-cover"
-        />
+        {/* Content */}
+        <div className={cn(
+          "w-full h-full relative",
+          !currentStory.image_url && "bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500"
+        )}>
+          {currentStory.image_url && (
+            <img 
+              src={currentStory.image_url} 
+              alt="Story" 
+              className="w-full h-full object-cover"
+            />
+          )}
 
-        {/* Text Overlay */}
-        {currentStory.text_overlay && (
-          <div className="absolute inset-0 flex items-center justify-center p-8 z-10">
-            <p className="text-white text-center text-4xl font-black uppercase tracking-tighter drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none whitespace-pre-wrap">
-              {currentStory.text_overlay}
-            </p>
-          </div>
-        )}
+          {/* Text Overlay */}
+          {currentStory.text_overlay && (
+            <div className="absolute inset-0 flex items-center justify-center p-8 z-10">
+              <p className="text-white text-center text-4xl font-black uppercase tracking-tighter drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none whitespace-pre-wrap">
+                {currentStory.text_overlay}
+              </p>
+            </div>
+          )}
+        </div>
 
         {/* Navigation Areas */}
         <div className="absolute inset-y-0 left-0 w-1/3 z-10 cursor-pointer" onClick={handlePrev} />

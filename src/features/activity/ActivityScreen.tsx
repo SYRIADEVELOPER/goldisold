@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, query, where, orderBy, limit, getDocs, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, limit, getDocs, doc, getDoc, writeBatch } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
 import { Heart, MessageCircle, UserPlus, Bell } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
@@ -30,27 +30,39 @@ export default function ActivityScreen() {
   const fetchNotifications = async () => {
     if (!user) return;
     try {
+      // Query without orderBy to avoid index issues/permission errors
       const notificationsQuery = query(
         collection(db, 'notifications'),
         where('user_id', '==', user.uid),
-        orderBy('created_at', 'desc'),
         limit(50)
       );
       const querySnapshot = await getDocs(notificationsQuery);
       
       const fetchedNotifications: Notification[] = [];
+      const batch = writeBatch(db);
+      let hasUnread = false;
+
       for (const notifDoc of querySnapshot.docs) {
         const notifData = notifDoc.data();
         let profileData = { username: 'Unknown', avatar_url: null };
         
         if (notifData.actor_id) {
-          const profileDoc = await getDoc(doc(db, 'profiles', notifData.actor_id));
-          if (profileDoc.exists()) {
-            profileData = {
-              username: profileDoc.data().username,
-              avatar_url: profileDoc.data().avatar_url || null
-            };
+          try {
+            const profileDoc = await getDoc(doc(db, 'profiles', notifData.actor_id));
+            if (profileDoc.exists()) {
+              profileData = {
+                username: profileDoc.data().username,
+                avatar_url: profileDoc.data().avatar_url || null
+              };
+            }
+          } catch (e) {
+            console.error('Error fetching profile for notification:', e);
           }
+        }
+
+        if (!notifData.is_read) {
+          batch.update(notifDoc.ref, { is_read: true });
+          hasUnread = true;
         }
 
         fetchedNotifications.push({
@@ -62,6 +74,17 @@ export default function ActivityScreen() {
         });
       }
       
+      // Sort in memory since we removed orderBy from query
+      fetchedNotifications.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+
+      if (hasUnread) {
+        try {
+          await batch.commit();
+        } catch (e) {
+          console.error('Error marking notifications as read:', e);
+        }
+      }
+
       setNotifications(fetchedNotifications);
     } catch (error) {
       console.error('Error fetching notifications:', error);
