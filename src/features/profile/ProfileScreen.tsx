@@ -9,12 +9,16 @@ import { ModerationService } from '@/src/services/moderationService';
 import { NotificationService } from '@/src/services/notificationService';
 import { motion, useScroll, useTransform } from 'motion/react';
 import UserListModal from './UserListModal';
+import { GeoService } from '@/src/services/geoService';
+import MyColors from '../store/components/MyColors';
 
 interface Profile {
   id: string;
   username: string;
   bio: string | null;
   avatar_url: string | null;
+  country_code: string | null;
+  active_color: string | null;
   followers: { count: number }[];
   following: { count: number }[];
 }
@@ -144,6 +148,8 @@ export default function ProfileScreen() {
           username: profileData.username,
           bio: profileData.bio || null,
           avatar_url: profileData.avatar_url || null,
+          country_code: profileData.country_code || null,
+          active_color: profileData.active_color || null,
           followers: [{ count: followersSnapshot.size }],
           following: [{ count: followingSnapshot.size }]
         });
@@ -244,7 +250,17 @@ export default function ProfileScreen() {
         </div>
 
         <div>
-          <h2 className="font-semibold text-white">{profile?.username}</h2>
+          <div className="flex items-center space-x-2">
+            <h2 className="font-semibold text-white" style={{ color: profile?.active_color || 'inherit' }}>{profile?.username}</h2>
+            {profile?.country_code && (
+              <img 
+                src={GeoService.getFlagUrl(profile.country_code)} 
+                alt={profile.country_code}
+                className="w-5 h-3.5 object-cover rounded-sm shadow-sm"
+                title={profile.country_code}
+              />
+            )}
+          </div>
           {profile?.bio && <p className="text-sm text-gray-300 mt-1 whitespace-pre-wrap">{profile.bio}</p>}
         </div>
 
@@ -308,6 +324,8 @@ export default function ProfileScreen() {
             </>
           )}
         </div>
+
+        {isOwnProfile && <MyColors />}
       </div>
 
       <div className="border-t border-white/5">

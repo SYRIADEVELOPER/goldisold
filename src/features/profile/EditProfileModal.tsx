@@ -1,11 +1,11 @@
 import React, { useState } from 'react';
 import { db, storage } from '@/src/lib/firebase';
-import { doc, updateDoc } from 'firebase/firestore';
+import { doc, updateDoc, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuthStore } from '../auth/store';
 import { X, Loader2, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-// import imageCompression from 'browser-image-compression';
+import { GeoService } from '@/src/services/geoService';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -19,18 +19,30 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
   const { user } = useAuthStore();
   const [bio, setBio] = useState(currentBio || '');
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [avatarUrl, setAvatarUrl] = useState(currentAvatarUrl || '');
   const [avatarPreview, setAvatarPreview] = useState<string | null>(currentAvatarUrl);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [countryCode, setCountryCode] = useState<string | null>(null);
 
   React.useEffect(() => {
     if (isOpen) {
       setBio(currentBio || '');
       setAvatarPreview(currentAvatarUrl);
+      setAvatarUrl(currentAvatarUrl || '');
       setAvatarFile(null);
       setError(null);
+      
+      // Fetch country code if not provided
+      if (user) {
+        getDoc(doc(db, 'profiles', user.uid)).then(docSnap => {
+          if (docSnap.exists()) {
+            setCountryCode(docSnap.data().country_code || null);
+          }
+        });
+      }
     }
-  }, [isOpen, currentBio, currentAvatarUrl]);
+  }, [isOpen, currentBio, currentAvatarUrl, user]);
 
   const handleImageSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -54,6 +66,16 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
     }
   };
 
+  const handleImageUrlChange = (url: string) => {
+    setAvatarUrl(url);
+    if (url.trim()) {
+      setAvatarPreview(url);
+      setAvatarFile(null);
+    } else {
+      setAvatarPreview(currentAvatarUrl);
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return;
@@ -62,7 +84,7 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
       setSubmitting(true);
       setError(null);
 
-      let newAvatarUrl = currentAvatarUrl;
+      let finalAvatarUrl = avatarUrl.trim() || currentAvatarUrl;
 
       if (avatarFile) {
         const fileExt = avatarFile.name.split('.').pop();
@@ -70,12 +92,12 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
         const storageRef = ref(storage, `avatars/${fileName}`);
 
         await uploadBytes(storageRef, avatarFile);
-        newAvatarUrl = await getDownloadURL(storageRef);
+        finalAvatarUrl = await getDownloadURL(storageRef);
       }
 
       await updateDoc(doc(db, 'profiles', user.uid), {
         bio: bio.trim(),
-        avatar_url: newAvatarUrl,
+        avatar_url: finalAvatarUrl,
       });
 
       onProfileUpdated();
@@ -106,7 +128,16 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
             className="relative w-full max-w-md bg-[#141414] rounded-3xl overflow-hidden border border-white/10"
           >
             <div className="flex items-center justify-between p-4 border-b border-white/10">
-              <h2 className="text-lg font-semibold text-white">Edit Profile</h2>
+              <div className="flex items-center space-x-2">
+                <h2 className="text-lg font-semibold text-white">Edit Profile</h2>
+                {countryCode && (
+                  <img 
+                    src={GeoService.getFlagUrl(countryCode)} 
+                    alt={countryCode}
+                    className="w-5 h-3.5 object-cover rounded-sm shadow-sm"
+                  />
+                )}
+              </div>
               <button 
                 onClick={onClose}
                 className="p-2 rounded-full hover:bg-white/10 transition-colors text-gray-400 hover:text-white"
@@ -144,6 +175,17 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
                   />
                 </div>
                 <p className="text-xs text-gray-400">Tap to change avatar</p>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-400 mb-2">Avatar URL (e.g. Pinterest link)</label>
+                <input
+                  type="url"
+                  value={avatarUrl}
+                  onChange={(e) => handleImageUrlChange(e.target.value)}
+                  placeholder="https://pinterest.com/..."
+                  className="w-full px-4 py-3 bg-[#0a0a0a] border border-white/10 rounded-xl focus:outline-none focus:border-[#C6A75E] transition-colors text-white text-sm"
+                />
               </div>
 
               <div>

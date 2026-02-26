@@ -9,8 +9,11 @@ import ViewStoryModal from './ViewStoryModal';
 interface Story {
   id: string;
   user_id: string;
-  image_url: string;
+  image_url: string | null;
   text_overlay: string | null;
+  background_style?: string | null;
+  font_style?: string | null;
+  text_color?: string | null;
   created_at: string;
   expires_at: string;
   is_viewed?: boolean;
@@ -93,6 +96,9 @@ export default function StoriesList() {
           user_id: storyData.user_id,
           image_url: storyData.image_url,
           text_overlay: storyData.text_overlay,
+          background_style: storyData.background_style,
+          font_style: storyData.font_style,
+          text_color: storyData.text_color,
           created_at: storyData.created_at,
           expires_at: storyData.expires_at,
           is_viewed: viewedStoryIds.has(storyDoc.id),
@@ -177,14 +183,14 @@ export default function StoriesList() {
                       <img src={group.profile.avatar_url} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-500 font-medium">
-                        {group.profile?.username?.[0]?.toUpperCase()}
+                        {group.profile?.username?.[0]?.toUpperCase() || '?'}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
               <span className="text-xs font-medium text-gray-300 w-16 truncate text-center">
-                {group.profile?.username}
+                {group.profile?.username || 'Unknown'}
               </span>
             </div>
           ))

@@ -1,15 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, deleteDoc, where, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
-import { useAuthStore } from '../auth/store';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, deleteDoc, where, startAfter, QueryDocumentSnapshot, runTransaction } from 'firebase/firestore';
+import { useAuthStore } from '@/src/features/auth/store';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, Share2, MoreHorizontal, ShieldAlert, Flag, Loader2 } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, ShieldAlert, Flag, Loader2, Smile } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import CommentsModal from './CommentsModal';
 import StoriesList from '../stories/StoriesList';
 import { ModerationService } from '@/src/services/moderationService';
 import { NotificationService } from '@/src/services/notificationService';
 import { cacheService } from '@/src/services/cacheService';
+import ReactionModal from '@/src/components/ReactionModal';
 
 interface Post {
   id: string;
@@ -24,6 +25,7 @@ interface Post {
   likes: { count: number }[];
   comments: { count: number }[];
   user_has_liked?: boolean;
+  reactions?: { [key: string]: number };
 }
 
 export default function FeedScreen() {
@@ -33,6 +35,7 @@ export default function FeedScreen() {
   const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
+  const [activeReactionPostId, setActiveReactionPostId] = useState<string | null>(null);
   const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const [activeTab, setActiveTab] = useState<'latest' | 'trending'>('latest');
   const { user } = useAuthStore();
@@ -90,14 +93,13 @@ export default function FeedScreen() {
           );
         }
       } else {
-        // ... existing trending query logic ...
+        // ... trending query logic ...
         const yesterday = new Date();
         yesterday.setDate(yesterday.getDate() - 1);
         
         postsQuery = query(
           collection(db, 'posts'),
           where('created_at', '>=', yesterday.toISOString()),
-          orderBy('created_at', 'desc'),
           limit(50)
         );
       }
@@ -120,13 +122,13 @@ export default function FeedScreen() {
       let fetchedPosts: Post[] = [];
       
       for (const postDoc of querySnapshot.docs) {
-        // ... existing post processing logic ...
+        // ... post processing ...
         const postData = postDoc.data() as any;
         
         // Skip if user is blocked
         if (blockedUserIds.includes(postData.user_id)) continue;
 
-        // Fetch profile
+        // ... profile fetching ...
         let profileData = { username: 'Unknown', avatar_url: '' };
         if (postData.user_id) {
           try {
@@ -134,45 +136,23 @@ export default function FeedScreen() {
             const cachedProfile = await cacheService.getProfile(postData.user_id);
             if (cachedProfile) {
               profileData = cachedProfile;
-            }
-            
-            // Then fetch fresh
-            const profileDoc = await getDoc(doc(db, 'profiles', postData.user_id));
-            if (profileDoc.exists()) {
-              profileData = {
-                username: profileDoc.data().username,
-                avatar_url: profileDoc.data().avatar_url || ''
-              };
-              // Update cache
-              await cacheService.saveProfile({ id: postData.user_id, ...profileData });
+            } else {
+              // Then fetch fresh
+              const profileDoc = await getDoc(doc(db, 'profiles', postData.user_id));
+              if (profileDoc.exists()) {
+                profileData = {
+                  username: profileDoc.data().username,
+                  avatar_url: profileDoc.data().avatar_url || ''
+                };
+                // Update cache
+                await cacheService.saveProfile({ id: postData.user_id, ...profileData });
+              }
             }
           } catch (e: any) {
-             // ... error handling ...
              if (e.code !== 'unavailable') {
               console.error('Error fetching profile for post:', e);
             }
           }
-        }
-
-        // ... existing likes/comments fetching ...
-        // Fetch likes count
-        let likesCount = 0;
-        try {
-          const likesQuery = query(collection(db, 'likes'), where('post_id', '==', postDoc.id));
-          const likesSnapshot = await getDocs(likesQuery);
-          likesCount = likesSnapshot.size;
-        } catch (e) {
-          console.error('Error fetching likes:', e);
-        }
-
-        // Fetch comments count
-        let commentsCount = 0;
-        try {
-          const commentsQuery = query(collection(db, 'comments'), where('post_id', '==', postDoc.id));
-          const commentsSnapshot = await getDocs(commentsQuery);
-          commentsCount = commentsSnapshot.size;
-        } catch (e) {
-          console.error('Error fetching comments:', e);
         }
 
         fetchedPosts.push({
@@ -182,9 +162,54 @@ export default function FeedScreen() {
           image_url: postData.image_url || '',
           created_at: postData.created_at,
           profiles: profileData,
-          likes: [{ count: likesCount }],
-          comments: [{ count: commentsCount }],
+          likes: [{ count: 0 }], // Will be updated below
+          comments: [{ count: 0 }], // Will be updated below
+          reactions: {}, // Will be updated below
         });
+      }
+
+      // Sort latest posts in memory if we removed orderBy (though latest query is simple)
+      if (activeTab === 'latest') {
+        fetchedPosts.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      }
+
+      // Fetch likes/comments/reactions for each post
+      for (let post of fetchedPosts) {
+        // Fetch likes count
+        try {
+          const likesQuery = query(collection(db, 'likes'), where('post_id', '==', post.id));
+          const likesSnapshot = await getDocs(likesQuery);
+          post.likes = [{ count: likesSnapshot.size }];
+        } catch (e) {
+          console.error('Error fetching likes:', e);
+        }
+
+        // Fetch comments count
+        try {
+          const commentsQuery = query(collection(db, 'comments'), where('post_id', '==', post.id));
+          const commentsSnapshot = await getDocs(commentsQuery);
+          post.comments = [{ count: commentsSnapshot.size }];
+        } catch (e) {
+          console.error('Error fetching comments:', e);
+        }
+
+        // Fetch reactions
+        try {
+          const reactionsQuery = query(collection(db, 'reactions'), where('post_id', '==', post.id));
+          const reactionsSnapshot = await getDocs(reactionsQuery);
+          reactionsSnapshot.forEach(reactionDoc => {
+            const reaction = reactionDoc.data();
+            if (post.reactions) {
+              if (post.reactions[reaction.emoji]) {
+                post.reactions[reaction.emoji]++;
+              } else {
+                post.reactions[reaction.emoji] = 1;
+              }
+            }
+          });
+        } catch (e) {
+          console.error('Error fetching reactions:', e);
+        }
       }
 
       // ... existing user likes check ...
@@ -248,6 +273,40 @@ export default function FeedScreen() {
     }
   };
 
+  const handleReaction = async (postId: string, emoji: string) => {
+    if (!user) return;
+
+    const reactionRef = doc(db, 'reactions', `${user.uid}_${postId}_${emoji}`);
+    const postRef = doc(db, 'posts', postId);
+
+    try {
+      await runTransaction(db, async (transaction) => {
+        const postDoc = await transaction.get(postRef);
+        if (!postDoc.exists()) {
+          throw 'Post does not exist!';
+        }
+
+        const postData = postDoc.data() as Post;
+        const reactions = postData.reactions || {};
+
+        if (reactions[emoji]) {
+          reactions[emoji]++;
+        } else {
+          reactions[emoji] = 1;
+        }
+
+        transaction.update(postRef, { reactions });
+        transaction.set(reactionRef, {
+          post_id: postId,
+          user_id: user.uid,
+          emoji: emoji,
+          created_at: new Date().toISOString(),
+        });
+      });
+    } catch (e) {
+      console.error('Error adding reaction: ', e);
+    }
+  };
   const handleLike = async (postId: string, isLiked: boolean) => {
     if (!user) return;
 
@@ -420,14 +479,14 @@ export default function FeedScreen() {
                     <img src={post.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
                   ) : (
                     <div className="w-full h-full flex items-center justify-center text-gray-500 font-medium">
-                      {post.profiles?.username?.[0]?.toUpperCase()}
+                      {post.profiles?.username?.[0]?.toUpperCase() || '?'}
                     </div>
                   )}
                 </div>
                 <div>
-                  <h3 className="font-semibold text-sm text-gray-200">{post.profiles?.username}</h3>
+                  <h3 className="font-semibold text-sm text-gray-200">{post.profiles?.username || 'Unknown'}</h3>
                   <p className="text-xs text-gray-500">
-                    {formatDistanceToNow(new Date(post.created_at), { addSuffix: true })}
+                    {post.created_at ? formatDistanceToNow(new Date(post.created_at), { addSuffix: true }) : 'Recently'}
                   </p>
                 </div>
               </div>
@@ -463,6 +522,18 @@ export default function FeedScreen() {
               </p>
             )}
 
+            {/* Post Reactions */}
+            {post.reactions && Object.keys(post.reactions).length > 0 && (
+              <div className="flex items-center space-x-2 pt-2">
+                {Object.entries(post.reactions).map(([emoji, count]) => (
+                  <div key={emoji} className="flex items-center space-x-1 bg-white/10 px-2 py-1 rounded-full">
+                    <span>{emoji}</span>
+                    <span className="text-xs font-medium text-gray-400">{count}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* Post Actions */}
             <div className="flex items-center space-x-6 pt-2">
               <button 
@@ -481,6 +552,12 @@ export default function FeedScreen() {
               >
                 <MessageCircle className="w-5 h-5" />
                 <span className="text-xs font-medium">{post.comments?.[0]?.count || 0}</span>
+              </button>
+              <button 
+                onClick={() => setActiveReactionPostId(post.id)}
+                className="flex items-center space-x-2 text-gray-500 hover:text-gray-300 transition-colors"
+              >
+                <Smile className="w-5 h-5" />
               </button>
               <button className="flex items-center space-x-2 text-gray-500 hover:text-gray-300 transition-colors ml-auto">
                 <Share2 className="w-5 h-5" />
@@ -517,6 +594,17 @@ export default function FeedScreen() {
         isOpen={!!activeCommentPostId} 
         onClose={() => setActiveCommentPostId(null)} 
         onCommentAdded={fetchPosts} 
+      />
+
+      <ReactionModal 
+        isOpen={!!activeReactionPostId}
+        onClose={() => setActiveReactionPostId(null)}
+        onSelect={(emoji) => {
+          if (activeReactionPostId) {
+            handleReaction(activeReactionPostId, emoji);
+          }
+          setActiveReactionPostId(null);
+        }}
       />
     </div>
   );

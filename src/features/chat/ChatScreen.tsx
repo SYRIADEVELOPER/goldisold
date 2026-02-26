@@ -6,11 +6,13 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Send, MoreVertical, Check, CheckCheck } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
 import { cn } from '@/src/lib/utils';
+import FileUploader from './components/FileUploader';
 
 interface Message {
   id: string;
   sender_id: string;
   content: string;
+  image_url?: string;
   created_at: any;
   read: boolean;
 }
@@ -48,7 +50,7 @@ export default function ChatScreen() {
         const chatData = docSnapshot.data();
         const otherUserId = chatData.participants.find((uid: string) => uid !== user.uid);
         
-        let otherUser = { username: 'Unknown', avatar_url: null };
+        let otherUser = { username: 'Unknown', avatar_url: null, active_color: null };
         if (otherUserId) {
           try {
             const userDoc = await getDoc(doc(db, 'profiles', otherUserId));
@@ -56,7 +58,8 @@ export default function ChatScreen() {
               const userData = userDoc.data();
               otherUser = {
                 username: userData.username,
-                avatar_url: userData.avatar_url || null
+                avatar_url: userData.avatar_url || null,
+                active_color: userData.active_color || null
               };
             }
           } catch (e) {
@@ -78,8 +81,7 @@ export default function ChatScreen() {
 
     // Subscribe to messages
     const messagesQuery = query(
-      collection(db, 'chats', id, 'messages'),
-      orderBy('created_at', 'asc')
+      collection(db, 'chats', id, 'messages')
     );
 
     const unsubscribeMessages = onSnapshot(messagesQuery, (snapshot) => {
@@ -90,6 +92,14 @@ export default function ChatScreen() {
           ...doc.data()
         } as Message);
       });
+      
+      // Sort in memory to avoid composite index requirement
+      fetchedMessages.sort((a, b) => {
+        const timeA = a.created_at?.seconds || 0;
+        const timeB = b.created_at?.seconds || 0;
+        return timeA - timeB;
+      });
+
       setMessages(fetchedMessages);
       scrollToBottom();
       
@@ -112,11 +122,10 @@ export default function ChatScreen() {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  const handleSendMessage = async (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent, content?: string) => {
     e.preventDefault();
-    if (!newMessage.trim() || !user || !id) return;
-
-    const messageContent = newMessage.trim();
+    const messageContent = content || newMessage.trim();
+    if (!messageContent || !user || !id) return;
     setNewMessage('');
     setIsTyping(false); // Stop typing immediately on send
     
@@ -132,6 +141,7 @@ export default function ChatScreen() {
       await addDoc(collection(db, 'chats', id, 'messages'), {
         sender_id: user.uid,
         content: messageContent,
+        image_url: content ? content : null,
         created_at: serverTimestamp(),
         read: false
       });
@@ -216,7 +226,7 @@ export default function ChatScreen() {
               )}
             </div>
             <div>
-              <h2 className="font-semibold text-white text-sm">{chat?.otherUser?.username}</h2>
+              <h2 className="font-semibold text-white text-sm" style={{ color: chat?.otherUser?.active_color || 'inherit' }}>{chat?.otherUser?.username}</h2>
               {isOtherUserTyping ? (
                 <p className="text-xs text-[#C6A75E] animate-pulse font-medium">Typing...</p>
               ) : (
@@ -252,6 +262,7 @@ export default function ChatScreen() {
                 )}
               >
                 <p>{message.content}</p>
+                {message.image_url && <img src={message.image_url} alt="" className="w-full h-auto mt-2 rounded-lg" />}
                 <div className={cn(
                   "text-[10px] mt-1 flex items-center justify-end space-x-1",
                   isOwn ? "text-[#0a0a0a]/60" : "text-gray-400"
@@ -275,6 +286,7 @@ export default function ChatScreen() {
       {/* Input */}
       <div className="p-4 border-t border-white/5 bg-[#0a0a0a]">
         <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
+          <FileUploader onUpload={(url) => handleSendMessage(new Event('submit'), url)} />
           <input
             type="text"
             value={newMessage}

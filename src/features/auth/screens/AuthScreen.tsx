@@ -4,6 +4,7 @@ import { createUserWithEmailAndPassword, signInWithEmailAndPassword } from 'fire
 import { doc, setDoc } from 'firebase/firestore';
 import { useAuthStore } from '../store';
 import { Loader2 } from 'lucide-react';
+import { GeoService } from '@/src/services/geoService';
 
 export default function AuthScreen() {
   const [isLogin, setIsLogin] = useState(true);
@@ -30,10 +31,15 @@ export default function AuthScreen() {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         const user = userCredential.user;
         
+        // Detect country
+        const countryCode = await GeoService.getCountryCode();
+        
         // Insert profile
         await setDoc(doc(db, 'profiles', user.uid), {
           username: username.toLowerCase(),
           created_at: new Date().toISOString(),
+          country_code: countryCode,
+          balance: 100, // Starting balance for all new users
         });
       }
       await checkSession();

@@ -157,7 +157,7 @@ export default function ActivityScreen() {
                       <img src={notification.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-500 font-medium">
-                        {notification.profiles?.username?.[0]?.toUpperCase()}
+                        {notification.profiles?.username?.[0]?.toUpperCase() || '?'}
                       </div>
                     )}
                   </div>
@@ -171,7 +171,7 @@ export default function ActivityScreen() {
                     {getMessage(notification.type, notification.profiles?.username || 'Someone')}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
-                    {formatDistanceToNow(new Date(notification.created_at), { addSuffix: true })}
+                    {notification.created_at ? formatDistanceToNow(new Date(notification.created_at), { addSuffix: true }) : 'Recently'}
                   </p>
                 </div>
               </div>

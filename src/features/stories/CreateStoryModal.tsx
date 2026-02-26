@@ -18,12 +18,41 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
   const [textOverlay, setTextOverlay] = useState('');
   const [loading, setLoading] = useState(false);
   const [isTextOnly, setIsTextOnly] = useState(false);
+  const [backgroundStyle, setBackgroundStyle] = useState('bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500');
+  const [fontStyle, setFontStyle] = useState('font-sans');
+  const [textColor, setTextColor] = useState('#FFFFFF');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { user } = useAuthStore();
+
+  const backgroundOptions = [
+    'bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500',
+    'bg-gradient-to-br from-yellow-400 via-orange-500 to-red-500',
+    'bg-gradient-to-br from-green-400 via-emerald-500 to-teal-500',
+    'bg-gradient-to-br from-blue-400 via-cyan-500 to-sky-500',
+    'bg-gradient-to-br from-gray-900 to-black',
+  ];
+
+  const fontOptions = [
+    { name: 'Modern', value: 'font-sans' },
+    { name: 'Elegant', value: 'font-serif' },
+    { name: 'Code', value: 'font-mono' },
+    { name: 'Bold', value: 'font-black tracking-tighter' },
+  ];
+
+  const colorOptions = [
+    '#FFFFFF',
+    '#000000',
+    '#FF6321',
+    '#00FF00',
+    '#4a90e2',
+    '#f5a623',
+    '#bd10e0',
+  ];
 
   if (!isOpen) return null;
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // ... existing logic ...
     const file = e.target.files?.[0];
     if (file) {
       if (!file.type.startsWith('image/')) {
@@ -82,6 +111,9 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
         user_id: user.uid,
         image_url: imageUrl,
         text_overlay: textOverlay.trim() || null,
+        background_style: isTextOnly ? backgroundStyle : null,
+        font_style: isTextOnly ? fontStyle : null,
+        text_color: isTextOnly ? textColor : null,
         created_at: new Date().toISOString(),
         expires_at: expiresAt.toISOString(),
         status: status
@@ -95,6 +127,9 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
       setPreview(null);
       setTextOverlay('');
       setIsTextOnly(false);
+      setBackgroundStyle(backgroundOptions[0]);
+      setFontStyle(fontOptions[0].value);
+      setTextColor('#FFFFFF');
       onStoryAdded();
       onClose();
     } catch (error: any) {
@@ -137,37 +172,100 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
               </button>
             </div>
           ) : (
-            <div className={cn(
-              "relative w-full aspect-[9/16] rounded-xl overflow-hidden",
-              isTextOnly ? "bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500" : "bg-black"
-            )}>
-              {preview && (
-                <img src={preview} alt="Preview" className="w-full h-full object-cover" />
-              )}
-              
-              <div className="absolute inset-0 flex items-center justify-center p-8">
-                <textarea
-                  value={textOverlay}
-                  onChange={(e) => setTextOverlay(e.target.value)}
-                  placeholder={isTextOnly ? "TYPE YOUR STORY..." : "WHAT'S ON YOUR MIND?"}
-                  className="w-full bg-transparent text-white text-center text-4xl font-black uppercase tracking-tighter placeholder-white/50 focus:outline-none resize-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none"
-                  rows={4}
-                  maxLength={100}
-                  autoFocus={isTextOnly}
-                />
+            <div className="flex flex-col space-y-4">
+              <div className={cn(
+                "relative w-full aspect-[9/16] rounded-xl overflow-hidden shadow-2xl",
+                isTextOnly ? backgroundStyle : "bg-black"
+              )}>
+                {preview && (
+                  <img src={preview} alt="Preview" className="w-full h-full object-cover" />
+                )}
+                
+                <div className="absolute inset-0 flex items-center justify-center p-8">
+                  <textarea
+                    value={textOverlay}
+                    onChange={(e) => setTextOverlay(e.target.value)}
+                    placeholder={isTextOnly ? "TYPE YOUR STORY..." : "WHAT'S ON YOUR MIND?"}
+                    style={{ color: isTextOnly ? textColor : '#FFFFFF' }}
+                    className={cn(
+                      "w-full bg-transparent text-center text-4xl uppercase placeholder-white/50 focus:outline-none resize-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none",
+                      isTextOnly ? fontStyle : "font-black tracking-tighter text-white"
+                    )}
+                    rows={6}
+                    maxLength={200}
+                    autoFocus={isTextOnly}
+                  />
+                </div>
+
+                <button
+                  onClick={() => {
+                    setImage(null);
+                    setPreview(null);
+                    setTextOverlay('');
+                    setIsTextOnly(false);
+                  }}
+                  className="absolute top-4 right-4 p-2 bg-black/50 backdrop-blur-md rounded-full text-white hover:bg-black/70 transition-colors z-10"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
 
-              <button
-                onClick={() => {
-                  setImage(null);
-                  setPreview(null);
-                  setTextOverlay('');
-                  setIsTextOnly(false);
-                }}
-                className="absolute top-4 right-4 p-2 bg-black/50 backdrop-blur-md rounded-full text-white hover:bg-black/70 transition-colors"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              {isTextOnly && (
+                <div className="space-y-4">
+                  <div>
+                    <label className="text-xs font-medium text-gray-400 mb-2 block">Background</label>
+                    <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+                      {backgroundOptions.map((bg, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setBackgroundStyle(bg)}
+                          className={cn(
+                            "w-10 h-10 rounded-full flex-shrink-0 border-2 transition-all",
+                            bg,
+                            backgroundStyle === bg ? "border-white scale-110" : "border-transparent opacity-70 hover:opacity-100"
+                          )}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-400 mb-2 block">Font Style</label>
+                    <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+                      {fontOptions.map((font, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setFontStyle(font.value)}
+                          className={cn(
+                            "px-4 py-2 rounded-lg text-sm font-medium border transition-all whitespace-nowrap",
+                            font.value,
+                            fontStyle === font.value 
+                              ? "bg-white text-black border-white" 
+                              : "bg-white/5 text-gray-400 border-white/10 hover:bg-white/10"
+                          )}
+                        >
+                          {font.name}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-xs font-medium text-gray-400 mb-2 block">Text Color</label>
+                    <div className="flex space-x-2 overflow-x-auto pb-2 scrollbar-hide">
+                      {colorOptions.map((color, idx) => (
+                        <button
+                          key={idx}
+                          onClick={() => setTextColor(color)}
+                          style={{ backgroundColor: color }}
+                          className={cn(
+                            "w-8 h-8 rounded-full flex-shrink-0 border-2 transition-all",
+                            textColor === color ? "border-white scale-110" : "border-white/10 opacity-70 hover:opacity-100"
+                          )}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { Home, Search, PlusSquare, Activity, User, MessageCircle, Shield } from 'lucide-react';
+import { Home, Search, PlusSquare, Activity, User, MessageCircle, Shield, ShoppingCart } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { useAuthStore } from '@/src/features/auth/store';
 import { db } from '@/src/lib/firebase';
@@ -27,18 +27,29 @@ export default function MainLayout() {
     return () => unsubscribe();
   }, [user]);
 
-  const navItems = [
+  const baseNavItems = [
     { icon: Home, label: 'Home', path: '/' },
     { icon: Search, label: 'Search', path: '/search' },
     { icon: PlusSquare, label: 'Create', path: '/create' },
     { icon: Activity, label: 'Activity', path: '/activity', badge: unreadCount },
     { icon: MessageCircle, label: 'Messages', path: '/chats' },
+    { icon: ShoppingCart, label: 'Store', path: '/store' },
     { icon: User, label: 'Profile', path: '/profile' },
   ];
 
-  if (isAdmin) {
-    navItems.splice(5, 0, { icon: Shield, label: 'Admin', path: '/admin/reports' });
-  }
+  const adminNavItems = [
+    { icon: Home, label: 'Home', path: '/' },
+    { icon: Search, label: 'Search', path: '/search' },
+    { icon: PlusSquare, label: 'Create', path: '/create' },
+    { icon: Activity, label: 'Activity', path: '/activity', badge: unreadCount },
+    { icon: MessageCircle, label: 'Messages', path: '/chats' },
+    { icon: ShoppingCart, label: 'Store', path: '/store' },
+    { icon: Shield, label: 'Admin', path: '/admin/reports' },
+    { icon: Shield, label: 'Store Admin', path: '/admin/store' },
+    { icon: User, label: 'Profile', path: '/profile' },
+  ];
+
+  const navItems = isAdmin ? adminNavItems : baseNavItems;
 
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] text-[#f5f5f5] font-sans">

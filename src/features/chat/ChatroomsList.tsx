@@ -28,8 +28,7 @@ export default function ChatroomsList() {
 
     // Query for public rooms or rooms where the user is a participant
     const q = query(
-      collection(db, 'chatrooms'),
-      orderBy('created_at', 'desc')
+      collection(db, 'chatrooms')
     );
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -49,6 +48,9 @@ export default function ChatroomsList() {
           });
         }
       }
+      
+      // Sort in memory
+      fetchedRooms.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
       
       setRooms(fetchedRooms);
       setLoading(false);

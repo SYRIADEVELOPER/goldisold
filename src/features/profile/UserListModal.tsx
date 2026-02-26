@@ -40,9 +40,10 @@ export default function UserListModal({ isOpen, onClose, userId, type, title }: 
       }
 
       const snapshot = await getDocs(q);
-      const userIds = snapshot.docs.map(doc => 
-        type === 'followers' ? doc.data().follower_id : doc.data().following_id
-      );
+      const userIds = snapshot.docs.map(doc => {
+        const data = doc.data() as any;
+        return type === 'followers' ? data.follower_id : data.following_id;
+      });
 
       const fetchedUsers: User[] = [];
       for (const id of userIds) {

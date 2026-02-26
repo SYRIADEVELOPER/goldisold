@@ -1,22 +1,26 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, query, where, orderBy, getDocs, addDoc, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, orderBy, getDocs, addDoc, doc, getDoc, setDoc, deleteDoc, onSnapshot } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
 import { formatDistanceToNow } from 'date-fns';
-import { X, Send, Loader2, Flag } from 'lucide-react';
+import { X, Send, Loader2, Flag, Heart } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
 import { ModerationService } from '@/src/services/moderationService';
 import { NotificationService } from '@/src/services/notificationService';
+import { useNavigate } from 'react-router-dom';
 
 interface Comment {
   id: string;
+  user_id: string;
   text_content: string;
   created_at: string;
   profiles: {
     username: string;
     avatar_url: string;
   };
+  likes_count: number;
+  user_has_liked?: boolean;
 }
 
 interface CommentsModalProps {
@@ -33,12 +37,72 @@ export default function CommentsModal({ postId, postOwnerId, isOpen, onClose, on
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const { user } = useAuthStore();
+  const navigate = useNavigate();
 
   useEffect(() => {
     if (isOpen) {
-      fetchComments();
+      const q = query(
+        collection(db, 'comments'),
+        where('post_id', '==', postId)
+      );
+
+      const unsubscribe = onSnapshot(q, async (snapshot) => {
+        const fetchedComments: Comment[] = [];
+        
+        for (const commentDoc of snapshot.docs) {
+          const commentData = commentDoc.data();
+          let profileData = { username: 'Unknown', avatar_url: '' };
+          
+          if (commentData.user_id) {
+            try {
+              const profileDoc = await getDoc(doc(db, 'profiles', commentData.user_id));
+              if (profileDoc.exists()) {
+                profileData = {
+                  username: profileDoc.data().username,
+                  avatar_url: profileDoc.data().avatar_url || ''
+                };
+              }
+            } catch (e) {
+              console.error('Error fetching profile for comment:', e);
+            }
+          }
+
+          // Fetch likes count
+          let likesCount = 0;
+          let userHasLiked = false;
+          try {
+            const likesQuery = query(collection(db, 'comment_likes'), where('comment_id', '==', commentDoc.id));
+            const likesSnapshot = await getDocs(likesQuery);
+            likesCount = likesSnapshot.size;
+            
+            if (user) {
+              userHasLiked = likesSnapshot.docs.some(doc => doc.data().user_id === user.uid);
+            }
+          } catch (e) {
+            console.error('Error fetching comment likes:', e);
+          }
+
+          fetchedComments.push({
+            id: commentDoc.id,
+            user_id: commentData.user_id,
+            text_content: commentData.text_content,
+            created_at: commentData.created_at,
+            profiles: profileData,
+            likes_count: likesCount,
+            user_has_liked: userHasLiked
+          });
+        }
+        
+        // Sort in memory
+        fetchedComments.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+        
+        setComments(fetchedComments);
+        setLoading(false);
+      });
+
+      return () => unsubscribe();
     }
-  }, [isOpen, postId]);
+  }, [isOpen, postId, user]);
 
   const handleReport = async (commentId: string) => {
     if (!user) return;
@@ -53,45 +117,53 @@ export default function CommentsModal({ postId, postOwnerId, isOpen, onClose, on
     }
   };
 
-  const fetchComments = async () => {
+  const toggleLike = async (comment: Comment) => {
+    if (!user) return;
     try {
-      setLoading(true);
-      const commentsQuery = query(
-        collection(db, 'comments'),
-        where('post_id', '==', postId),
-        orderBy('created_at', 'asc')
-      );
-      const querySnapshot = await getDocs(commentsQuery);
+      const likeId = `${user.uid}_${comment.id}`;
+      const likeRef = doc(db, 'comment_likes', likeId);
       
-      const fetchedComments: Comment[] = [];
-      for (const commentDoc of querySnapshot.docs) {
-        const commentData = commentDoc.data();
-        let profileData = { username: 'Unknown', avatar_url: '' };
-        
-        if (commentData.user_id) {
-          const profileDoc = await getDoc(doc(db, 'profiles', commentData.user_id));
-          if (profileDoc.exists()) {
-            profileData = {
-              username: profileDoc.data().username,
-              avatar_url: profileDoc.data().avatar_url || ''
-            };
-          }
-        }
-
-        fetchedComments.push({
-          id: commentDoc.id,
-          text_content: commentData.text_content,
-          created_at: commentData.created_at,
-          profiles: profileData
+      if (comment.user_has_liked) {
+        await deleteDoc(likeRef);
+      } else {
+        await setDoc(likeRef, {
+          comment_id: comment.id,
+          user_id: user.uid,
+          created_at: new Date().toISOString()
         });
+        
+        // Notify comment owner
+        if (comment.user_id !== user.uid) {
+          await NotificationService.sendNotification(comment.user_id, user.uid, 'like', postId);
+        }
       }
-      
-      setComments(fetchedComments);
     } catch (error) {
-      console.error('Error fetching comments:', error);
-    } finally {
-      setLoading(false);
+      console.error('Error toggling comment like:', error);
     }
+  };
+
+  const renderTextWithMentions = (text: string) => {
+    const parts = text.split(/(@\w+)/g);
+    return parts.map((part, i) => {
+      if (part.startsWith('@')) {
+        const username = part.substring(1);
+        return (
+          <button
+            key={i}
+            onClick={(e) => {
+              e.stopPropagation();
+              // We'd need to find the user ID by username, but for now we'll just navigate to a search or profile if we had the ID
+              // A better way would be to store mentions as objects with IDs, but let's do a simple version
+              navigate(`/search?q=${username}`);
+            }}
+            className="text-[#C6A75E] hover:underline font-medium"
+          >
+            {part}
+          </button>
+        );
+      }
+      return part;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -112,7 +184,6 @@ export default function CommentsModal({ postId, postOwnerId, isOpen, onClose, on
       }
 
       setNewComment('');
-      fetchComments();
       onCommentAdded();
     } catch (error) {
       console.error('Error posting comment:', error);
@@ -164,35 +235,59 @@ export default function CommentsModal({ postId, postOwnerId, isOpen, onClose, on
             ) : (
               comments.map((comment) => (
                 <div key={comment.id} className="flex space-x-3 group">
-                  <div className="w-8 h-8 rounded-full bg-white/10 overflow-hidden flex-shrink-0">
+                  <button 
+                    onClick={() => {
+                      navigate(`/profile/${comment.user_id}`);
+                      onClose();
+                    }}
+                    className="w-8 h-8 rounded-full bg-white/10 overflow-hidden flex-shrink-0 hover:opacity-80 transition-opacity"
+                  >
                     {comment.profiles?.avatar_url ? (
                       <img src={comment.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-xs text-gray-500 font-medium">
-                        {comment.profiles?.username?.[0]?.toUpperCase()}
+                        {comment.profiles?.username?.[0]?.toUpperCase() || '?'}
                       </div>
                     )}
-                  </div>
+                  </button>
                   <div className="flex-1">
                     <div className="flex items-baseline space-x-2">
-                      <span className="font-semibold text-sm text-gray-200">
-                        {comment.profiles?.username}
-                      </span>
+                      <button 
+                        onClick={() => {
+                          navigate(`/profile/${comment.user_id}`);
+                          onClose();
+                        }}
+                        className="font-semibold text-sm text-gray-200 hover:text-white transition-colors"
+                      >
+                        {comment.profiles?.username || 'Unknown'}
+                      </button>
                       <span className="text-xs text-gray-500">
-                        {formatDistanceToNow(new Date(comment.created_at), { addSuffix: true })}
+                        {comment.created_at ? formatDistanceToNow(new Date(comment.created_at), { addSuffix: true }) : 'Recently'}
                       </span>
                     </div>
                     <p className="text-sm text-gray-300 mt-1 break-words">
-                      {comment.text_content}
+                      {renderTextWithMentions(comment.text_content)}
                     </p>
+                    <div className="flex items-center space-x-4 mt-2">
+                      <button 
+                        onClick={() => toggleLike(comment)}
+                        className={cn(
+                          "flex items-center space-x-1 text-xs transition-colors",
+                          comment.user_has_liked ? "text-red-500" : "text-gray-500 hover:text-gray-300"
+                        )}
+                      >
+                        <Heart className={cn("w-3 h-3", comment.user_has_liked && "fill-current")} />
+                        <span>{comment.likes_count || 0}</span>
+                      </button>
+                      <button 
+                        onClick={() => handleReport(comment.id)}
+                        className="text-xs text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100 flex items-center space-x-1"
+                      >
+                        <Flag className="w-3 h-3" />
+                        <span>Report</span>
+                      </button>
+                    </div>
                   </div>
-                  <button 
-                    onClick={() => handleReport(comment.id)}
-                    className="p-1 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
-                    title="Report Comment"
-                  >
-                    <Flag className="w-3 h-3" />
-                  </button>
                 </div>
               ))
             )}

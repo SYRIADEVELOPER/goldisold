@@ -6,9 +6,11 @@ import { auth, db } from '@/src/lib/firebase';
 interface AuthState {
   user: User | null;
   profile: any | null;
+  role: 'user' | 'moderator' | 'admin' | null;
   isLoading: boolean;
   setUser: (user: User | null) => void;
   setProfile: (profile: any | null) => void;
+  setRole: (role: 'user' | 'moderator' | 'admin' | null) => void;
   signOut: () => Promise<void>;
   checkSession: () => Promise<void>;
 }
@@ -16,9 +18,11 @@ interface AuthState {
 export const useAuthStore = create<AuthState>((set, get) => ({
   user: null,
   profile: null,
+  role: null,
   isLoading: true,
   setUser: (user) => set({ user }),
   setProfile: (profile) => set({ profile }),
+  setRole: (role) => set({ role }),
   signOut: async () => {
     const { user } = get();
     if (user) {
@@ -42,7 +46,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           try {
             const profileDoc = await getDoc(doc(db, 'profiles', user.uid));
             if (profileDoc.exists()) {
-              set({ profile: { id: profileDoc.id, ...profileDoc.data() } });
+              const profileData = profileDoc.data();
+              set({ profile: { id: profileDoc.id, ...profileData } });
+              set({ role: profileData.role || 'user' });
               
               // Update presence
               await updateDoc(doc(db, 'profiles', user.uid), {

@@ -13,14 +13,19 @@ import FeedScreen from './features/feed/FeedScreen';
 import SearchScreen from './features/search/SearchScreen';
 import CreateScreen from './features/posts/CreateScreen';
 import ActivityScreen from './features/activity/ActivityScreen';
+import StoreScreen from './features/store/StoreScreen';
 import ProfileScreen from './features/profile/ProfileScreen';
 import ChatListScreen from './features/chat/ChatListScreen';
 import ChatScreen from './features/chat/ChatScreen';
 import ChatroomScreen from './features/chat/ChatroomScreen';
 import AdminReportsScreen from './features/admin/AdminReportsScreen';
+import AdminStoreScreen from './features/admin/AdminStoreScreen';
+import AdminScreen from './features/admin/AdminScreen';
+import { withAuthorization } from './features/auth/withAuthorization';
 import { AlertTriangle } from 'lucide-react';
 
 export default function App() {
+  const AdminRoute = withAuthorization(AdminScreen, ['admin']);
   const { user, isLoading, checkSession } = useAuthStore();
 
   useEffect(() => {
@@ -58,10 +63,13 @@ export default function App() {
             <Route path="/search" element={<SearchScreen />} />
             <Route path="/create" element={<CreateScreen />} />
             <Route path="/activity" element={<ActivityScreen />} />
+            <Route path="/store" element={<StoreScreen />} />
             <Route path="/chats" element={<ChatListScreen />} />
             <Route path="/chats/:id" element={<ChatScreen />} />
             <Route path="/rooms/:id" element={<ChatroomScreen />} />
             <Route path="/admin/reports" element={<AdminReportsScreen />} />
+            <Route path="/admin/store" element={<AdminStoreScreen />} />
+            <Route path="/admin" element={<AdminRoute />} />
             <Route path="/profile" element={<ProfileScreen />} />
             <Route path="/profile/:id" element={<ProfileScreen />} />
             <Route path="*" element={<Navigate to="/" replace />} />
