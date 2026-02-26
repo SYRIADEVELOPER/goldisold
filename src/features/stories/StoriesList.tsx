@@ -13,22 +13,34 @@ interface Story {
   text_overlay: string | null;
   created_at: string;
   expires_at: string;
+  is_viewed?: boolean;
   profiles: {
     username: string;
     avatar_url: string | null;
   };
 }
 
+interface UserStories {
+  user_id: string;
+  stories: Story[];
+  all_viewed: boolean;
+  profile: {
+    username: string;
+    avatar_url: string | null;
+  };
+}
+
 export default function StoriesList() {
-  const [stories, setStories] = useState<Story[]>([]);
+  const [displayGroups, setDisplayGroups] = useState<UserStories[]>([]);
   const [loading, setLoading] = useState(true);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [viewStoryIndex, setViewStoryIndex] = useState<number | null>(null);
+  const [activeStories, setActiveStories] = useState<Story[]>([]);
   const { user } = useAuthStore();
 
   useEffect(() => {
     fetchStories();
-  }, []);
+  }, [user]);
 
   const fetchStories = async () => {
     try {
@@ -43,6 +55,14 @@ export default function StoriesList() {
       
       const querySnapshot = await getDocs(storiesQuery);
       const fetchedStories: Story[] = [];
+
+      // Fetch views for current user
+      const viewedStoryIds = new Set<string>();
+      if (user) {
+        const viewsQuery = query(collection(db, 'story_views'), where('user_id', '==', user.uid));
+        const viewsSnapshot = await getDocs(viewsQuery);
+        viewsSnapshot.docs.forEach(doc => viewedStoryIds.add(doc.data().story_id));
+      }
 
       for (const storyDoc of querySnapshot.docs) {
         const storyData = storyDoc.data();
@@ -69,6 +89,7 @@ export default function StoriesList() {
           text_overlay: storyData.text_overlay,
           created_at: storyData.created_at,
           expires_at: storyData.expires_at,
+          is_viewed: viewedStoryIds.has(storyDoc.id),
           profiles: profileData
         });
       }
@@ -76,21 +97,33 @@ export default function StoriesList() {
       // Group stories by user
       const groupedStories = fetchedStories.reduce((acc, story) => {
         if (!acc[story.user_id]) {
-          acc[story.user_id] = [];
+          acc[story.user_id] = {
+            user_id: story.user_id,
+            stories: [],
+            all_viewed: true,
+            profile: story.profiles
+          };
         }
-        acc[story.user_id].push(story);
+        acc[story.user_id].stories.push(story);
+        if (!story.is_viewed) {
+          acc[story.user_id].all_viewed = false;
+        }
         return acc;
-      }, {} as Record<string, Story[]>);
+      }, {} as Record<string, UserStories>);
 
-      // Flatten to show the first story of each user
-      const displayStories = Object.values(groupedStories).map(userStories => userStories[0]);
-
-      setStories(displayStories);
+      const groups = Object.values(groupedStories);
+      setDisplayGroups(groups);
     } catch (error) {
       console.error('Error fetching stories:', error);
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleViewStories = (groupIndex: number) => {
+    const group = displayGroups[groupIndex];
+    setActiveStories(group.stories);
+    setViewStoryIndex(0);
   };
 
   return (
@@ -121,27 +154,31 @@ export default function StoriesList() {
             </div>
           ))
         ) : (
-          stories.map((story, index) => (
+          displayGroups.map((group, index) => (
             <div 
-              key={story.id} 
+              key={group.user_id} 
               className="flex flex-col items-center space-y-2 flex-shrink-0 cursor-pointer group"
-              onClick={() => setViewStoryIndex(index)}
+              onClick={() => handleViewStories(index)}
             >
-              <div className="w-16 h-16 rounded-full p-[2px] bg-gradient-to-tr from-[#C6A75E] to-[#f5d98a] group-hover:scale-105 transition-transform">
+              <div className={`w-16 h-16 rounded-full p-[2px] transition-all duration-300 ${
+                group.all_viewed 
+                  ? 'bg-white/10' 
+                  : 'bg-gradient-to-tr from-[#C6A75E] to-[#f5d98a] group-hover:scale-105'
+              }`}>
                 <div className="w-full h-full rounded-full bg-[#0a0a0a] p-[2px]">
                   <div className="w-full h-full rounded-full overflow-hidden bg-white/10">
-                    {story.profiles?.avatar_url ? (
-                      <img src={story.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
+                    {group.profile?.avatar_url ? (
+                      <img src={group.profile.avatar_url} alt="" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center text-gray-500 font-medium">
-                        {story.profiles?.username?.[0]?.toUpperCase()}
+                        {group.profile?.username?.[0]?.toUpperCase()}
                       </div>
                     )}
                   </div>
                 </div>
               </div>
               <span className="text-xs font-medium text-gray-300 w-16 truncate text-center">
-                {story.profiles?.username}
+                {group.profile?.username}
               </span>
             </div>
           ))
@@ -155,10 +192,13 @@ export default function StoriesList() {
       />
 
       <ViewStoryModal 
-        stories={stories} 
+        stories={activeStories} 
         initialIndex={viewStoryIndex ?? 0} 
         isOpen={viewStoryIndex !== null} 
-        onClose={() => setViewStoryIndex(null)} 
+        onClose={() => {
+          setViewStoryIndex(null);
+          fetchStories(); // Refresh to update viewed status
+        }} 
       />
     </div>
   );

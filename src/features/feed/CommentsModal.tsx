@@ -3,9 +3,11 @@ import { db } from '@/src/lib/firebase';
 import { collection, query, where, orderBy, getDocs, addDoc, doc, getDoc } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
 import { formatDistanceToNow } from 'date-fns';
-import { X, Send, Loader2 } from 'lucide-react';
+import { X, Send, Loader2, Flag } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import { motion, AnimatePresence } from 'motion/react';
+import { ModerationService } from '@/src/services/moderationService';
+import { NotificationService } from '@/src/services/notificationService';
 
 interface Comment {
   id: string;
@@ -19,12 +21,13 @@ interface Comment {
 
 interface CommentsModalProps {
   postId: string;
+  postOwnerId: string;
   isOpen: boolean;
   onClose: () => void;
   onCommentAdded: () => void;
 }
 
-export default function CommentsModal({ postId, isOpen, onClose, onCommentAdded }: CommentsModalProps) {
+export default function CommentsModal({ postId, postOwnerId, isOpen, onClose, onCommentAdded }: CommentsModalProps) {
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(true);
@@ -36,6 +39,19 @@ export default function CommentsModal({ postId, isOpen, onClose, onCommentAdded 
       fetchComments();
     }
   }, [isOpen, postId]);
+
+  const handleReport = async (commentId: string) => {
+    if (!user) return;
+    const reason = window.prompt('Why are you reporting this comment?');
+    if (reason) {
+      try {
+        await ModerationService.reportContent(user.uid, commentId, 'comment', reason);
+        alert('Thank you for your report.');
+      } catch (error) {
+        console.error('Error reporting comment:', error);
+      }
+    }
+  };
 
   const fetchComments = async () => {
     try {
@@ -91,6 +107,10 @@ export default function CommentsModal({ postId, isOpen, onClose, onCommentAdded 
         created_at: new Date().toISOString()
       });
 
+      if (postOwnerId) {
+        await NotificationService.sendNotification(postOwnerId, user.uid, 'comment', postId);
+      }
+
       setNewComment('');
       fetchComments();
       onCommentAdded();
@@ -143,7 +163,7 @@ export default function CommentsModal({ postId, isOpen, onClose, onCommentAdded 
               </div>
             ) : (
               comments.map((comment) => (
-                <div key={comment.id} className="flex space-x-3">
+                <div key={comment.id} className="flex space-x-3 group">
                   <div className="w-8 h-8 rounded-full bg-white/10 overflow-hidden flex-shrink-0">
                     {comment.profiles?.avatar_url ? (
                       <img src={comment.profiles.avatar_url} alt="" className="w-full h-full object-cover" />
@@ -166,6 +186,13 @@ export default function CommentsModal({ postId, isOpen, onClose, onCommentAdded 
                       {comment.text_content}
                     </p>
                   </div>
+                  <button 
+                    onClick={() => handleReport(comment.id)}
+                    className="p-1 text-gray-600 hover:text-red-500 transition-colors opacity-0 group-hover:opacity-100"
+                    title="Report Comment"
+                  >
+                    <Flag className="w-3 h-3" />
+                  </button>
                 </div>
               ))
             )}

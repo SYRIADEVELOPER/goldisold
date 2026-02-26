@@ -6,7 +6,7 @@ import { useAuthStore } from '../auth/store';
 import { useNavigate } from 'react-router-dom';
 import { Image as ImageIcon, X, Loader2 } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import imageCompression from 'browser-image-compression';
+// import imageCompression from 'browser-image-compression';
 
 export default function CreateScreen() {
   const [text, setText] = useState('');
@@ -46,12 +46,15 @@ export default function CreateScreen() {
       let imageUrl = null;
 
       if (image) {
+        /*
         const options = {
           maxSizeMB: 1,
           maxWidthOrHeight: 1920,
           useWebWorker: true,
         };
         const compressedFile = await imageCompression(image, options);
+        */
+        const compressedFile = image; // Temporary bypass
 
         const fileExt = image.name.split('.').pop() || 'jpg';
         const fileName = `${Math.random()}.${fileExt}`;

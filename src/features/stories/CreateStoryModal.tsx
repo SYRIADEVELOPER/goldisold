@@ -5,7 +5,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuthStore } from '../auth/store';
 import { X, Loader2, Image as ImageIcon } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
-import imageCompression from 'browser-image-compression';
+// import imageCompression from 'browser-image-compression';
 
 interface CreateStoryModalProps {
   isOpen: boolean;
@@ -48,12 +48,15 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
 
     setLoading(true);
     try {
+      /*
       const options = {
         maxSizeMB: 1,
         maxWidthOrHeight: 1920,
         useWebWorker: true,
       };
       const compressedFile = await imageCompression(image, options);
+      */
+      const compressedFile = image; // Temporary bypass
 
       const fileExt = image.name.split('.').pop() || 'jpg';
       const fileName = `${Math.random()}.${fileExt}`;
@@ -110,13 +113,13 @@ export default function CreateStoryModal({ isOpen, onClose, onStoryAdded }: Crea
             <div className="relative w-full aspect-[9/16] rounded-xl overflow-hidden bg-black">
               <img src={preview} alt="Preview" className="w-full h-full object-cover" />
               
-              <div className="absolute inset-0 flex items-center justify-center p-6">
+              <div className="absolute inset-0 flex items-center justify-center p-8">
                 <textarea
                   value={textOverlay}
                   onChange={(e) => setTextOverlay(e.target.value)}
-                  placeholder="Add text..."
-                  className="w-full bg-transparent text-white text-center text-2xl font-bold placeholder-white/50 focus:outline-none resize-none drop-shadow-md"
-                  rows={3}
+                  placeholder="WHAT'S ON YOUR MIND?"
+                  className="w-full bg-transparent text-white text-center text-4xl font-black uppercase tracking-tighter placeholder-white/20 focus:outline-none resize-none drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none"
+                  rows={4}
                   maxLength={100}
                 />
               </div>

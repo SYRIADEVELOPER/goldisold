@@ -1,18 +1,21 @@
 import React, { useEffect, useState } from 'react';
 import { db } from '@/src/lib/firebase';
-import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, deleteDoc, where } from 'firebase/firestore';
+import { collection, query, orderBy, limit, getDocs, doc, getDoc, setDoc, deleteDoc, where, startAfter, QueryDocumentSnapshot } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
 import { formatDistanceToNow } from 'date-fns';
-import { Heart, MessageCircle, Share2, MoreHorizontal } from 'lucide-react';
+import { Heart, MessageCircle, Share2, MoreHorizontal, ShieldAlert, Flag } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
 import CommentsModal from './CommentsModal';
 import StoriesList from '../stories/StoriesList';
+import { ModerationService } from '@/src/services/moderationService';
+import { NotificationService } from '@/src/services/notificationService';
 
 interface Post {
   id: string;
   text_content: string;
   image_url: string;
   created_at: string;
+  user_id: string;
   profiles: {
     username: string;
     avatar_url: string;
@@ -25,25 +28,66 @@ interface Post {
 export default function FeedScreen() {
   const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [lastVisible, setLastVisible] = useState<QueryDocumentSnapshot | null>(null);
+  const [hasMore, setHasMore] = useState(true);
   const [activeCommentPostId, setActiveCommentPostId] = useState<string | null>(null);
+  const [blockedUserIds, setBlockedUserIds] = useState<string[]>([]);
   const { user } = useAuthStore();
 
   useEffect(() => {
-    fetchPosts();
-  }, []);
+    const init = async () => {
+      if (user) {
+        const blocked = await ModerationService.getBlockedUsers(user.uid);
+        setBlockedUserIds(blocked);
+      }
+      fetchPosts();
+    };
+    init();
+  }, [user]);
 
-  const fetchPosts = async () => {
+  const fetchPosts = async (isLoadMore = false) => {
+    if (isLoadMore && !hasMore) return;
+    
     try {
-      setLoading(true);
-      const postsQuery = query(collection(db, 'posts'), orderBy('created_at', 'desc'), limit(20));
+      if (isLoadMore) setLoadingMore(true);
+      else setLoading(true);
+
+      let postsQuery = query(
+        collection(db, 'posts'), 
+        orderBy('created_at', 'desc'), 
+        limit(10)
+      );
+
+      if (isLoadMore && lastVisible) {
+        postsQuery = query(
+          collection(db, 'posts'),
+          orderBy('created_at', 'desc'),
+          startAfter(lastVisible),
+          limit(10)
+        );
+      }
+
       const querySnapshot = await getDocs(postsQuery);
       
+      if (querySnapshot.empty) {
+        setHasMore(false);
+        if (!isLoadMore) setPosts([]);
+        return;
+      }
+
+      setLastVisible(querySnapshot.docs[querySnapshot.docs.length - 1]);
+      if (querySnapshot.size < 10) setHasMore(false);
+
       const fetchedPosts: Post[] = [];
       
       for (const postDoc of querySnapshot.docs) {
         const postData = postDoc.data();
         
-        // Fetch profile
+        // Skip if user is blocked
+        if (blockedUserIds.includes(postData.user_id)) continue;
+
+        // Fetch profile (Optimized: we could denormalize this into the post doc for ultra-fast response)
         let profileData = { username: 'Unknown', avatar_url: '' };
         if (postData.user_id) {
           try {
@@ -59,7 +103,7 @@ export default function FeedScreen() {
           }
         }
 
-        // Fetch likes count
+        // Fetch likes count (Optimized: should be a field in the post doc)
         let likesCount = 0;
         try {
           const likesQuery = query(collection(db, 'likes'), where('post_id', '==', postDoc.id));
@@ -69,7 +113,7 @@ export default function FeedScreen() {
           console.error('Error fetching likes:', e);
         }
 
-        // Fetch comments count
+        // Fetch comments count (Optimized: should be a field in the post doc)
         let commentsCount = 0;
         try {
           const commentsQuery = query(collection(db, 'comments'), where('post_id', '==', postDoc.id));
@@ -81,6 +125,7 @@ export default function FeedScreen() {
 
         fetchedPosts.push({
           id: postDoc.id,
+          user_id: postData.user_id,
           text_content: postData.text_content || '',
           image_url: postData.image_url || '',
           created_at: postData.created_at,
@@ -94,7 +139,6 @@ export default function FeedScreen() {
         try {
           const userLikesQuery = query(collection(db, 'likes'), where('user_id', '==', user.uid));
           const userLikesSnapshot = await getDocs(userLikesQuery);
-          
           const likedPostIds = new Set(userLikesSnapshot.docs.map(doc => doc.data().post_id));
           
           for (let i = 0; i < fetchedPosts.length; i++) {
@@ -105,16 +149,37 @@ export default function FeedScreen() {
         }
       }
 
-      setPosts(fetchedPosts);
+      if (isLoadMore) {
+        setPosts(prev => [...prev, ...fetchedPosts]);
+      } else {
+        setPosts(fetchedPosts);
+      }
     } catch (error) {
       console.error('Error fetching posts:', error);
     } finally {
       setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const handleReport = async (postId: string) => {
+    if (!user) return;
+    const reason = window.prompt('Why are you reporting this post?');
+    if (reason) {
+      try {
+        await ModerationService.reportContent(user.uid, postId, 'post', reason);
+        alert('Thank you for your report. We will review it shortly.');
+      } catch (error) {
+        console.error('Error reporting post:', error);
+      }
     }
   };
 
   const handleLike = async (postId: string, isLiked: boolean) => {
     if (!user) return;
+
+    const post = posts.find(p => p.id === postId);
+    const postOwnerId = post?.user_id;
 
     // Optimistic update
     setPosts((currentPosts) =>
@@ -135,12 +200,18 @@ export default function FeedScreen() {
       const likeRef = doc(db, 'likes', `${user.uid}_${postId}`);
       if (isLiked) {
         await deleteDoc(likeRef);
+        if (postOwnerId) {
+          await NotificationService.removeNotification(postOwnerId, user.uid, 'like', postId);
+        }
       } else {
         await setDoc(likeRef, {
           post_id: postId,
           user_id: user.uid,
           created_at: new Date().toISOString()
         });
+        if (postOwnerId) {
+          await NotificationService.sendNotification(postOwnerId, user.uid, 'like', postId);
+        }
       }
     } catch (error: any) {
       console.error('Error toggling like:', error);
@@ -199,9 +270,18 @@ export default function FeedScreen() {
                   </p>
                 </div>
               </div>
-              <button className="text-gray-500 hover:text-gray-300 transition-colors">
-                <MoreHorizontal className="w-5 h-5" />
-              </button>
+              <div className="flex items-center space-x-2">
+                <button 
+                  onClick={() => handleReport(post.id)}
+                  className="p-2 text-gray-500 hover:text-red-500 transition-colors rounded-full hover:bg-white/5"
+                  title="Report Post"
+                >
+                  <Flag className="w-4 h-4" />
+                </button>
+                <button className="text-gray-500 hover:text-gray-300 transition-colors">
+                  <MoreHorizontal className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Post Content */}
@@ -248,6 +328,18 @@ export default function FeedScreen() {
           </article>
         ))}
 
+        {hasMore && (
+          <div className="p-8 flex justify-center">
+            <button
+              onClick={() => fetchPosts(true)}
+              disabled={loadingMore}
+              className="px-6 py-2 bg-white/5 hover:bg-white/10 text-white rounded-xl transition-colors font-medium disabled:opacity-50"
+            >
+              {loadingMore ? 'Loading...' : 'Load More'}
+            </button>
+          </div>
+        )}
+
         {posts.length === 0 && (
           <div className="flex flex-col items-center justify-center p-12 text-center text-gray-500">
             <div className="w-16 h-16 rounded-full bg-white/5 flex items-center justify-center mb-4">
@@ -260,6 +352,7 @@ export default function FeedScreen() {
 
       <CommentsModal 
         postId={activeCommentPostId || ''} 
+        postOwnerId={posts.find(p => p.id === activeCommentPostId)?.user_id || ''}
         isOpen={!!activeCommentPostId} 
         onClose={() => setActiveCommentPostId(null)} 
         onCommentAdded={fetchPosts} 

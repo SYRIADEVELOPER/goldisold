@@ -5,7 +5,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useAuthStore } from '../auth/store';
 import { X, Loader2, Camera } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import imageCompression from 'browser-image-compression';
+// import imageCompression from 'browser-image-compression';
 
 interface EditProfileModalProps {
   isOpen: boolean;
@@ -28,6 +28,7 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
     if (!file) return;
 
     try {
+      /*
       const compressedFile = await imageCompression(file, {
         maxSizeMB: 1,
         maxWidthOrHeight: 1024,
@@ -35,6 +36,9 @@ export default function EditProfileModal({ isOpen, onClose, currentBio, currentA
       });
       setAvatarFile(compressedFile);
       setAvatarPreview(URL.createObjectURL(compressedFile));
+      */
+      setAvatarFile(file); // Temporary bypass
+      setAvatarPreview(URL.createObjectURL(file));
     } catch (err) {
       console.error('Error compressing image:', err);
       setError('Failed to process image');

@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { X, ChevronLeft, ChevronRight } from 'lucide-react';
 import { formatDistanceToNow } from 'date-fns';
+import { db } from '@/src/lib/firebase';
+import { doc, setDoc } from 'firebase/firestore';
+import { useAuthStore } from '../auth/store';
 
 interface Story {
   id: string;
@@ -23,6 +26,25 @@ interface ViewStoryModalProps {
 export default function ViewStoryModal({ stories, initialIndex, isOpen, onClose }: ViewStoryModalProps) {
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
   const [progress, setProgress] = useState(0);
+  const { user } = useAuthStore();
+
+  useEffect(() => {
+    if (isOpen && user && stories[currentIndex]) {
+      const recordView = async () => {
+        try {
+          const viewRef = doc(db, 'story_views', `${user.uid}_${stories[currentIndex].id}`);
+          await setDoc(viewRef, {
+            story_id: stories[currentIndex].id,
+            user_id: user.uid,
+            viewed_at: new Date().toISOString()
+          });
+        } catch (error) {
+          console.error('Error recording story view:', error);
+        }
+      };
+      recordView();
+    }
+  }, [currentIndex, isOpen, user, stories]);
 
   useEffect(() => {
     if (isOpen) {
@@ -121,8 +143,8 @@ export default function ViewStoryModal({ stories, initialIndex, isOpen, onClose 
 
         {/* Text Overlay */}
         {currentStory.text_overlay && (
-          <div className="absolute inset-0 flex items-center justify-center p-6 z-10">
-            <p className="text-white text-center text-2xl font-bold drop-shadow-lg whitespace-pre-wrap">
+          <div className="absolute inset-0 flex items-center justify-center p-8 z-10">
+            <p className="text-white text-center text-4xl font-black uppercase tracking-tighter drop-shadow-[0_4px_12px_rgba(0,0,0,0.5)] leading-none whitespace-pre-wrap">
               {currentStory.text_overlay}
             </p>
           </div>

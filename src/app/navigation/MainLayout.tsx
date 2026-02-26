@@ -1,16 +1,25 @@
 import React from 'react';
 import { Outlet, NavLink } from 'react-router-dom';
-import { Home, Search, PlusSquare, Activity, User } from 'lucide-react';
+import { Home, Search, PlusSquare, Activity, User, MessageCircle, Shield } from 'lucide-react';
 import { cn } from '@/src/lib/utils';
+import { useAuthStore } from '@/src/features/auth/store';
 
 export default function MainLayout() {
+  const { user } = useAuthStore();
+  const isAdmin = user?.email === 'kiatrbe3a@gmail.com';
+
   const navItems = [
     { icon: Home, label: 'Home', path: '/' },
     { icon: Search, label: 'Search', path: '/search' },
     { icon: PlusSquare, label: 'Create', path: '/create' },
     { icon: Activity, label: 'Activity', path: '/activity' },
+    { icon: MessageCircle, label: 'Messages', path: '/chats' },
     { icon: User, label: 'Profile', path: '/profile' },
   ];
+
+  if (isAdmin) {
+    navItems.splice(5, 0, { icon: Shield, label: 'Admin', path: '/admin/reports' });
+  }
 
   return (
     <div className="flex flex-col h-screen bg-[#0a0a0a] text-[#f5f5f5] font-sans">

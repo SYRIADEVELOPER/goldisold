@@ -2,9 +2,11 @@ import React, { useEffect, useState } from 'react';
 import { db } from '@/src/lib/firebase';
 import { collection, query, where, getDocs, doc, getDoc, setDoc, deleteDoc, orderBy } from 'firebase/firestore';
 import { useAuthStore } from '../auth/store';
-import { Grid, Settings, LogOut, Heart, UserPlus, UserCheck } from 'lucide-react';
+import { Grid, Settings, LogOut, Heart, UserPlus, UserCheck, ShieldAlert, Shield } from 'lucide-react';
 import EditProfileModal from './EditProfileModal';
 import { useParams } from 'react-router-dom';
+import { ModerationService } from '@/src/services/moderationService';
+import { NotificationService } from '@/src/services/notificationService';
 
 interface Profile {
   id: string;
@@ -28,12 +30,15 @@ export default function ProfileScreen() {
   const [loading, setLoading] = useState(true);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [isFollowing, setIsFollowing] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false);
+  const [isBlockingMe, setIsBlockingMe] = useState(false);
 
   const profileId = id || user?.uid;
   const isOwnProfile = user?.uid === profileId;
 
   useEffect(() => {
     if (profileId) {
+      checkModerationStatus();
       fetchProfile();
       fetchPosts();
       if (!isOwnProfile && user) {
@@ -41,6 +46,39 @@ export default function ProfileScreen() {
       }
     }
   }, [profileId, user]);
+
+  const checkModerationStatus = async () => {
+    if (!user || !profileId || isOwnProfile) return;
+    try {
+      const [blocked, blockingMe] = await Promise.all([
+        ModerationService.isBlocked(user.uid, profileId),
+        ModerationService.isBlocked(profileId, user.uid)
+      ]);
+      setIsBlocked(blocked);
+      setIsBlockingMe(blockingMe);
+    } catch (error) {
+      console.error('Error checking moderation status:', error);
+    }
+  };
+
+  const toggleBlock = async () => {
+    if (!user || !profileId) return;
+    try {
+      if (isBlocked) {
+        await ModerationService.unblockUser(user.uid, profileId);
+      } else {
+        if (window.confirm('Are you sure you want to block this user? They will no longer be able to see your content or message you.')) {
+          await ModerationService.blockUser(user.uid, profileId);
+          setIsFollowing(false);
+        } else {
+          return;
+        }
+      }
+      setIsBlocked(!isBlocked);
+    } catch (error) {
+      console.error('Error toggling block:', error);
+    }
+  };
 
   const checkFollowStatus = async () => {
     if (!user || !profileId) return;
@@ -58,12 +96,14 @@ export default function ProfileScreen() {
       const followRef = doc(db, 'followers', `${user.uid}_${profileId}`);
       if (isFollowing) {
         await deleteDoc(followRef);
+        await NotificationService.removeNotification(profileId, user.uid, 'follow');
       } else {
         await setDoc(followRef, {
           follower_id: user.uid,
           following_id: profileId,
           created_at: new Date().toISOString()
         });
+        await NotificationService.sendNotification(profileId, user.uid, 'follow');
       }
       setIsFollowing(!isFollowing);
       fetchProfile(); // Refresh follower count
@@ -199,26 +239,50 @@ export default function ProfileScreen() {
               </button>
             </>
           ) : (
-            <button
-              onClick={toggleFollow}
-              className={`flex-1 font-medium py-1.5 rounded-lg text-sm transition-colors flex items-center justify-center space-x-2 ${
-                isFollowing
-                  ? 'bg-white/10 text-white hover:bg-white/15'
-                  : 'bg-[#C6A75E] text-[#0a0a0a] hover:bg-[#b59855]'
-              }`}
-            >
-              {isFollowing ? (
-                <>
-                  <UserCheck className="w-4 h-4" />
-                  <span>Following</span>
-                </>
-              ) : (
-                <>
-                  <UserPlus className="w-4 h-4" />
-                  <span>Follow</span>
-                </>
+            <>
+              {!isBlocked && !isBlockingMe && (
+                <button
+                  onClick={toggleFollow}
+                  className={`flex-1 font-medium py-1.5 rounded-lg text-sm transition-colors flex items-center justify-center space-x-2 ${
+                    isFollowing
+                      ? 'bg-white/10 text-white hover:bg-white/15'
+                      : 'bg-[#C6A75E] text-[#0a0a0a] hover:bg-[#b59855]'
+                  }`}
+                >
+                  {isFollowing ? (
+                    <>
+                      <UserCheck className="w-4 h-4" />
+                      <span>Following</span>
+                    </>
+                  ) : (
+                    <>
+                      <UserPlus className="w-4 h-4" />
+                      <span>Follow</span>
+                    </>
+                  )}
+                </button>
               )}
-            </button>
+              <button
+                onClick={toggleBlock}
+                className={`flex-1 font-medium py-1.5 rounded-lg text-sm transition-colors flex items-center justify-center space-x-2 ${
+                  isBlocked
+                    ? 'bg-red-500/20 text-red-500 hover:bg-red-500/30'
+                    : 'bg-white/10 text-white hover:bg-white/15'
+                }`}
+              >
+                {isBlocked ? (
+                  <>
+                    <Shield className="w-4 h-4" />
+                    <span>Unblock</span>
+                  </>
+                ) : (
+                  <>
+                    <ShieldAlert className="w-4 h-4" />
+                    <span>Block</span>
+                  </>
+                )}
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -230,24 +294,33 @@ export default function ProfileScreen() {
           </button>
         </div>
 
-        <div className="grid grid-cols-3 gap-0.5">
-          {posts.map((post) => (
-            <div key={post.id} className="aspect-square bg-[#141414] relative group cursor-pointer">
-              {post.image_url ? (
-                <img src={post.image_url} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center p-2">
-                  <p className="text-[10px] text-gray-500 line-clamp-4 text-center">
-                    Text Post
-                  </p>
+        {isBlocked || isBlockingMe ? (
+          <div className="flex flex-col items-center justify-center py-20 text-gray-500">
+            <ShieldAlert className="w-12 h-12 mb-4 opacity-20" />
+            <p className="text-sm font-medium">
+              {isBlocked ? 'You have blocked this user' : 'This account is private or unavailable'}
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-3 gap-0.5">
+            {posts.map((post) => (
+              <div key={post.id} className="aspect-square bg-[#141414] relative group cursor-pointer">
+                {post.image_url ? (
+                  <img src={post.image_url} alt="" className="w-full h-full object-cover" />
+                ) : (
+                  <div className="w-full h-full flex items-center justify-center p-2">
+                    <p className="text-[10px] text-gray-500 line-clamp-4 text-center">
+                      Text Post
+                    </p>
+                  </div>
+                )}
+                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                  <Heart className="w-6 h-6 text-white" />
                 </div>
-              )}
-              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                <Heart className="w-6 h-6 text-white" />
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {isEditModalOpen && (
